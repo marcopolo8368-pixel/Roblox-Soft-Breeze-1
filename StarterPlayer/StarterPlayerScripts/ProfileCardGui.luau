@@ -28,7 +28,20 @@ local GiveReputationEvent = Remotes:WaitForChild("GiveReputation")
 local RequestReputationFunc = Remotes:WaitForChild("RequestReputation")
 local ReputationUpdatedEvent = Remotes:WaitForChild("ReputationUpdated")
 local RequestRepCooldownFunc = Remotes:WaitForChild("RequestRepCooldown")
+local AdminRepCanUseFunc = Remotes:FindFirstChild("AdminRepCanUse")
 local RepSounds = ReplicatedStorage:WaitForChild("RepSounds")
+
+local isAuthorizedAdmin = false
+if AdminRepCanUseFunc and AdminRepCanUseFunc:IsA("RemoteFunction") then
+	local ok, result = pcall(function()
+		return AdminRepCanUseFunc:InvokeServer()
+	end)
+	if ok and result == true then
+		isAuthorizedAdmin = true
+	end
+end
+
+_G.IsAuthorizedAdmin = isAuthorizedAdmin
 
 local actionToSound = {
 	thumbsUp = "ThumbsUp",
@@ -86,10 +99,25 @@ local COLORS = {
 	cardBg2 = Color3.fromRGB(30, 22, 50),
 }
 
+local EMOJI = {
+	thumbsUp = utf8.char(0x1F44D),
+	thumbsDown = utf8.char(0x1F44E),
+	love = utf8.char(0x2764, 0xFE0F),
+	studio = utf8.char(0x1F3AE),
+	chill = utf8.char(0x1F60C),
+	happy = utf8.char(0x1F604),
+	vibing = utf8.char(0x1F3B5),
+	sad = utf8.char(0x1F614),
+	tired = utf8.char(0x1F634),
+	energetic = utf8.char(0x26A1),
+	creative = utf8.char(0x1F3A8),
+	thoughtful = utf8.char(0x1F914),
+}
+
 local MOODS = { "Chill", "Happy", "Vibing", "Sad", "Tired", "Energetic", "Creative", "Thoughtful" }
 local MOOD_SYMBOLS = {
-	Chill = "??", Happy = "??", Vibing = "??", Sad = "??",
-	Tired = "??", Energetic = "?", Creative = "??", Thoughtful = "??",
+	Chill = EMOJI.chill, Happy = EMOJI.happy, Vibing = EMOJI.vibing, Sad = EMOJI.sad,
+	Tired = EMOJI.tired, Energetic = EMOJI.energetic, Creative = EMOJI.creative, Thoughtful = EMOJI.thoughtful,
 }
 
 -- -------------------------------------------
@@ -321,7 +349,7 @@ local function updateCardDisplay(card, data, userId)
 	card:FindFirstChild("Bio").Text = data.bio or ""
 
 	local mood = data.mood or "Chill"
-	local symbol = MOOD_SYMBOLS[mood] or "??"
+	local symbol = MOOD_SYMBOLS[mood] or EMOJI.thoughtful
 	card:FindFirstChild("MoodBadge"):FindFirstChild("MoodText").Text = symbol .. "  " .. mood
 
 	local quoteLabel = card:FindFirstChild("Quote")
@@ -485,7 +513,7 @@ formFrame.BackgroundTransparency = 1
 
 local previewCard
 if IS_SMALL_SCREEN then
-	-- Mobile: NO preview card — form takes the full editor space
+	-- Mobile: NO preview card ï¿½ form takes the full editor space
 	formFrame.Size = UDim2.new(1, -24, 0, 600)
 	formFrame.Position = UDim2.new(0, 12, 0, 8)
 	formFrame.Parent = editorContentParent
@@ -724,7 +752,7 @@ function updatePreview()
 end
 
 -- ===========================================================================
--- VIEWER  –  single unified glass panel (complete redesign)
+-- VIEWER  ï¿½  single unified glass panel (complete redesign)
 -- ===========================================================================
 -- -- viewport metrics ---------------------------------------------------
 local _vp  = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
@@ -916,7 +944,7 @@ local _moodLabel = Instance.new("TextLabel")
 _moodLabel.Name               = "MoodText"
 _moodLabel.Size               = UDim2.new(1, -8, 1, 0)
 _moodLabel.BackgroundTransparency = 1
-_moodLabel.Text               = "??  Chill"
+_moodLabel.Text               = EMOJI.chill .. "  Chill"
 _moodLabel.TextColor3         = COLORS.text
 _moodLabel.TextSize           = IS_SMALL_SCREEN and 11 or 12
 _moodLabel.Font               = Enum.Font.GothamBold
@@ -1085,9 +1113,9 @@ local THUMBS_DOWN_COLOR = Color3.fromRGB(200, 62, 62)
 local LOVE_COLOR        = Color3.fromRGB(218, 65, 148)
 
 -- layout order: 1 = ??,  2 = ?? (middle),  3 = ??
-local thumbsUpBtn   = createRepButton("?? +1", THUMBS_UP_COLOR,   1, repButtonRow)
-local loveBtn       = createRepButton("?? +2", LOVE_COLOR,         2, repButtonRow)
-local thumbsDownBtn = createRepButton("?? -1", THUMBS_DOWN_COLOR, 3, repButtonRow)
+local thumbsUpBtn   = createRepButton(EMOJI.thumbsUp .. " +1", THUMBS_UP_COLOR,   1, repButtonRow)
+local loveBtn       = createRepButton(EMOJI.love .. " +2", LOVE_COLOR,         2, repButtonRow)
+local thumbsDownBtn = createRepButton(EMOJI.thumbsDown .. " -1", THUMBS_DOWN_COLOR, 3, repButtonRow)
 
 -- -- status label -------------------------------------------------------
 local repStatusLabel = Instance.new("TextLabel")
@@ -1106,7 +1134,7 @@ repStatusLabel.Parent             = profilePanel
 -- -- aliases required by the functions that follow ---------------------
 local repPanel       = profilePanel   -- flashRepPanel references repPanelStroke
 local repPanelStroke = _stroke        -- UIStroke on the panel
-local viewerCard     = profilePanel   -- updateCardDisplay(viewerCard, …)
+local viewerCard     = profilePanel   -- updateCardDisplay(viewerCard, ï¿½)
 
 -- -- X button wiring (pendingRepAction handled by viewerCloseBtn below) -
 local currentViewTargetUserId = nil
@@ -1172,7 +1200,7 @@ local function refreshRepCooldownStatus()
 
 	if currentViewTargetUserId == player.UserId then
 		if RunService:IsStudio() then
-			repStatusLabel.Text = "?? Studio test — vote freely"
+			repStatusLabel.Text = EMOJI.studio .. " Studio test - vote freely"
 			repStatusLabel.TextColor3 = Color3.fromRGB(255, 185, 55)
 			setRepButtonsEnabled(true)
 			return
@@ -1571,7 +1599,7 @@ if RunService:IsStudio() then
 	dbgBtn.BackgroundColor3 = Color3.fromRGB(48, 36, 80)
 	dbgBtn.BorderSizePixel  = 0
 	dbgBtn.AutoButtonColor  = false
-	dbgBtn.Text             = "??  View My Card (Studio)"
+	dbgBtn.Text             = EMOJI.studio .. "  View My Card (Studio)"
 	dbgBtn.TextSize         = 12
 	dbgBtn.TextColor3       = Color3.fromRGB(255, 210, 100)
 	dbgBtn.Font             = Enum.Font.GothamBold
