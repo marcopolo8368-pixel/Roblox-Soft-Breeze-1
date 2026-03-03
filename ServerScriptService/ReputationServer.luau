@@ -17,6 +17,7 @@ local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 
 local IS_STUDIO = RunService:IsStudio()
+local DEBUG_REP_LOGS = true
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local GiveReputationEvent = Remotes:WaitForChild("GiveReputation")
@@ -24,14 +25,30 @@ local RequestReputationFunc = Remotes:WaitForChild("RequestReputation")
 local ReputationUpdatedEvent = Remotes:WaitForChild("ReputationUpdated")
 local RequestRepCooldownFunc = Remotes:WaitForChild("RequestRepCooldown")
 local RequestLeaderboardFunc = Remotes:WaitForChild("RequestLeaderboard")
+local AdminRepEvent = Remotes:WaitForChild("AdminRepEvent")
+local AdminRepResponse = Remotes:WaitForChild("AdminRepResponse")
+local AdminRepCanUse = Remotes:WaitForChild("AdminRepCanUse")
 
 local RepStore = DataStoreService:GetDataStore("PlayerReputation_v1")
 
+local function dlog(...)
+	if DEBUG_REP_LOGS then
+		print("[ReputationServerDBG]", ...)
+	end
+end
+
 local COOLDOWN_SECONDS = 24 * 60 * 60
+local cooldownsEnabled = true  -- admin can toggle this off server-wide
 local ACTION_VALUES = {
 	thumbsUp = 1,
 	thumbsDown = -1,
 	love = 2,
+}
+
+local REACTION_TEXTURES = {
+	thumbsUp = "rbxassetid://91121509552328",
+	thumbsDown = "rbxassetid://132991258217907",
+	love = "rbxassetid://78729481165822",
 }
 
 local TIERS = {
@@ -52,6 +69,17 @@ local DEFAULT_REP = {
 }
 
 local repCache = {} -- [userId] = rep data
+local dirtyRepUsers = {} -- [userId] = true
+local pendingSaveTasks = {} -- [userId] = true
+
+local SAVE_DEBOUNCE_SECONDS = 8
+local SAVE_SCAN_INTERVAL_SECONDS = 30
+
+-- ── ADMIN LIST ───────────────────────────────────────────────────────────────
+local ADMIN_IDS = {
+	[6163688260] = true,        -- ← replace with your UserId
+	-- [987654321] = true, -- add more admins like this
+}
 
 local function cloneDefaultRep()
 	return {
@@ -166,7 +194,7 @@ end
 
 local function saveRepForUserId(userId)
 	local data = repCache[userId]
-	if not data then return end
+	if not data then return false end
 
 	pruneCooldowns(data)
 	local key = "rep_" .. tostring(userId)
@@ -176,7 +204,36 @@ local function saveRepForUserId(userId)
 
 	if not success then
 		warn("[ReputationServer] Failed saving rep for userId " .. tostring(userId) .. ": " .. tostring(err))
+		return false
 	end
+
+	return true
+end
+
+local function saveRepNow(userId)
+	if not userId then return end
+	pendingSaveTasks[userId] = nil
+	if not dirtyRepUsers[userId] then return end
+	if saveRepForUserId(userId) then
+		dirtyRepUsers[userId] = nil
+	else
+		dirtyRepUsers[userId] = true
+	end
+end
+
+local function markRepDirty(userId, saveDelaySeconds)
+	if not userId then return end
+	dirtyRepUsers[userId] = true
+
+	if pendingSaveTasks[userId] then
+		return
+	end
+
+	pendingSaveTasks[userId] = true
+	local delaySeconds = math.max(0, tonumber(saveDelaySeconds) or SAVE_DEBOUNCE_SECONDS)
+	task.delay(delaySeconds, function()
+		saveRepNow(userId)
+	end)
 end
 
 local function loadRepForPlayer(player)
@@ -216,10 +273,14 @@ end
 local function pushRepUpdate(userId, repData, titleUpgraded)
 	local payload = buildRepPayload(userId, repData)
 	payload.titleUpgraded = titleUpgraded == true
+	dlog("pushRepUpdate", "userId=", userId, "score=", payload.score, "title=", payload.title, "titleUpgraded=", payload.titleUpgraded)
 
 	ReputationUpdatedEvent:FireAllClients(payload)
 	if _G.FireRepUpdateForNametag then
+		dlog("firing nametag update", userId)
 		_G.FireRepUpdateForNametag(payload)
+	else
+		dlog("nametag update skipped: _G.FireRepUpdateForNametag missing")
 	end
 end
 
@@ -252,11 +313,22 @@ local function playTitleParticleBurst(player, tierColor)
 		NumberSequenceKeypoint.new(0.7, 0.2),
 		NumberSequenceKeypoint.new(1, 1),
 	})
+	emitter.Enabled = true
 	emitter.Parent = attachment
 
-	emitter:Emit(28)
+	-- :Emit() does NOT replicate to clients; use brief high Rate instead
+	emitter.Rate = 140
+	task.delay(0.2, function()
+		if emitter and emitter.Parent then
+			emitter.Rate = 0
+			emitter.Enabled = false
+		end
+	end)
 	Debris:AddItem(attachment, 2)
 end
+
+-- playReactionBurst removed: OverheadLabel owns all reaction visuals
+-- via _G.FireRepReactionForNametag to avoid race-condition double-destroy
 
 GiveReputationEvent.OnServerEvent:Connect(function(voter, targetUserId, action)
 	if type(targetUserId) ~= "number" then
@@ -294,7 +366,7 @@ GiveReputationEvent.OnServerEvent:Connect(function(voter, targetUserId, action)
 	end
 
 	local remaining = getCooldownRemaining(voter.UserId, targetUserId)
-	if remaining > 0 and not IS_STUDIO then
+	if remaining > 0 and cooldownsEnabled and not IS_STUDIO then
 		fireVoteResult(voter, {
 			ok = false,
 			reason = "Cooldown active",
@@ -340,9 +412,16 @@ GiveReputationEvent.OnServerEvent:Connect(function(voter, targetUserId, action)
 		titleUpgraded = titleUpgraded,
 	})
 
+	if _G.FireRepReactionForNametag then
+		dlog("firing reaction aura", action, "for", targetUserId)
+		_G.FireRepReactionForNametag(targetUserId, action)
+	else
+		warn("[ReputationServer] _G.FireRepReactionForNametag not ready — reaction skipped")
+	end
+
 	task.spawn(function()
-		saveRepForUserId(voter.UserId)
-		saveRepForUserId(targetUserId)
+		markRepDirty(voter.UserId)
+		markRepDirty(targetUserId)
 	end)
 end)
 
@@ -361,9 +440,10 @@ RequestRepCooldownFunc.OnServerInvoke = function(voter, targetUserId)
 	end
 
 	local remaining = getCooldownRemaining(voter.UserId, targetUserId)
+	local cooldownActive = cooldownsEnabled and not IS_STUDIO
 	return {
-		canVote = remaining <= 0,
-		remainingSeconds = remaining,
+		canVote = (not cooldownActive) or remaining <= 0,
+		remainingSeconds = cooldownActive and remaining or 0,
 	}
 end
 
@@ -385,14 +465,47 @@ RequestLeaderboardFunc.OnServerInvoke = function()
 	return rows
 end
 
+-- Track which players have had their rep fully loaded
+local repReadyPlayers = {}
+_G.IsRepReadyForPlayer = function(userId)
+	return repReadyPlayers[userId] == true
+end
+
 Players.PlayerAdded:Connect(function(player)
 	loadRepForPlayer(player)
+	repReadyPlayers[player.UserId] = true
+	-- Re-fire the update now that we know OverheadLabel may be listening
+	local repData = repCache[player.UserId]
+	if repData and _G.FireRepUpdateForNametag then
+		dlog("PlayerAdded refire", player.Name, player.UserId)
+		_G.FireRepUpdateForNametag(buildRepPayload(player.UserId, repData))
+	else
+		dlog("PlayerAdded refire skipped", player.Name, "hasRepData=", repData ~= nil, "hasNametagFn=", _G.FireRepUpdateForNametag ~= nil)
+	end
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-	saveRepForUserId(player.UserId)
+	repReadyPlayers[player.UserId] = nil
+end)
+
+task.spawn(function()
+	while true do
+		task.wait(SAVE_SCAN_INTERVAL_SECONDS)
+		for userId in pairs(dirtyRepUsers) do
+			if not pendingSaveTasks[userId] then
+				saveRepNow(userId)
+			end
+		end
+	end
+end)
+
+
+Players.PlayerRemoving:Connect(function(player)
+	saveRepNow(player.UserId)
 	task.delay(45, function()
 		repCache[player.UserId] = nil
+		dirtyRepUsers[player.UserId] = nil
+		pendingSaveTasks[player.UserId] = nil
 	end)
 end)
 
@@ -403,3 +516,115 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 print("[ReputationServer] Reputation backend initialized.")
+
+AdminRepCanUse.OnServerInvoke = function(requester)
+	return requester and ADMIN_IDS[requester.UserId] == true or false
+end
+
+-- ── HANDLER ──────────────────────────────────────────────────────────────────
+AdminRepEvent.OnServerEvent:Connect(function(admin, payload)
+
+	-- Hard security check — reject anyone not in the list
+	if not ADMIN_IDS[admin.UserId] then
+		warn("[AdminRep] Unauthorized request from " .. admin.Name .. " (" .. admin.UserId .. ")")
+		AdminRepResponse:FireClient(admin, { ok = false, msg = "Admin only" })
+		return
+	end
+
+	if type(payload) ~= "table" then
+		AdminRepResponse:FireClient(admin, { ok = false, msg = "Bad payload" })
+		return
+	end
+
+	local action       = payload.action
+	local targetUserId = tonumber(payload.targetUserId)
+	local value        = tonumber(payload.value)
+
+	local targetPlayer = targetUserId and Players:GetPlayerByUserId(targetUserId)
+
+	-- toggleCooldowns is a server-wide toggle, handle it early
+	if action == "toggleCooldowns" then
+		cooldownsEnabled = not cooldownsEnabled
+		AdminRepResponse:FireClient(admin, {
+			ok = true,
+			kind = "cooldownToggle",
+			cooldownsEnabled = cooldownsEnabled,
+			msg = "Cooldowns " .. (cooldownsEnabled and "enabled" or "disabled") .. " for this server.",
+		})
+		print("[AdminRep] " .. admin.Name .. " toggled cooldowns: " .. tostring(cooldownsEnabled))
+		return
+	end
+
+	-- getCooldownState returns current toggle value
+	if action == "getCooldownState" then
+		AdminRepResponse:FireClient(admin, {
+			ok = true,
+			kind = "cooldownToggle",
+			cooldownsEnabled = cooldownsEnabled,
+		})
+		return
+	end
+
+	if not targetPlayer then
+		AdminRepResponse:FireClient(admin, { ok = false, msg = "Player not in server" })
+		return
+	end
+
+	local data = getCachedOrDefault(targetUserId)
+	local beforeTier = getTierIndex(data.score)
+	local newScore
+
+	if action == "set" then
+		if not value then
+			AdminRepResponse:FireClient(admin, { ok = false, msg = "No value given" })
+			return
+		end
+		newScore = math.clamp(math.floor(value), -9999, 99999)
+
+	elseif action == "add" then
+		if not value then
+			AdminRepResponse:FireClient(admin, { ok = false, msg = "No value given" })
+			return
+		end
+		newScore = math.clamp(math.floor(data.score + value), -9999, 99999)
+
+	elseif action == "reset" then
+		newScore = 0
+
+	else
+		AdminRepResponse:FireClient(admin, { ok = false, msg = "Unknown action" })
+		return
+	end
+
+	-- Apply the change
+	local oldScore = data.score
+	data.score = newScore
+
+	local afterTier     = getTierIndex(newScore)
+	local tierUpgraded  = afterTier > beforeTier
+
+	-- Push live update to nametag + all clients
+	pushRepUpdate(targetUserId, data, tierUpgraded)
+
+	-- Save to DataStore
+	task.spawn(function()
+		markRepDirty(targetUserId, 0)
+	end)
+
+	-- Fire burst effect if tier upgraded
+	if tierUpgraded then
+		local burstPayload = buildRepPayload(targetUserId, data)
+		playTitleParticleBurst(targetPlayer, burstPayload.tierColor)
+	end
+
+	-- Reply to admin
+	local newTitle = buildRepPayload(targetUserId, data).title
+	AdminRepResponse:FireClient(admin, {
+		ok  = true,
+		msg = targetPlayer.DisplayName .. ": " .. oldScore .. " → " .. newScore .. "  (" .. newTitle .. ")",
+	})
+
+	print("[AdminRep] " .. admin.Name .. " set " .. targetPlayer.Name .. " rep: " .. oldScore .. " → " .. newScore)
+end)
+
+print("[AdminRep] Admin reputation commands active.")
