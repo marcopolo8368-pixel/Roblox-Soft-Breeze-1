@@ -14,8 +14,25 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- Check admin status directly via remote (fast, no yielding for other scripts)
+local isAdmin = false
+do
+	local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local adminFunc = Remotes and Remotes:FindFirstChild("AdminRepCanUse")
+	if adminFunc and adminFunc:IsA("RemoteFunction") then
+		local ok, result = pcall(function()
+			return adminFunc:InvokeServer()
+		end)
+		if ok and result == true then
+			isAdmin = true
+		end
+	end
+end
 
 -- -------------------------------------------
 -- CONFIGURATION
@@ -36,6 +53,7 @@ local COLORS = {
 	teleportAccent = Color3.fromRGB(79, 172, 254),
 	profileAccent = Color3.fromRGB(138, 100, 214),
 	settingsAccent = Color3.fromRGB(100, 200, 160),
+	adminAccent = Color3.fromRGB(220, 80, 100),
 }
 
 local function tween(instance, props, duration, style)
@@ -165,16 +183,34 @@ local FEATURES = {
 		color = COLORS.settingsAccent,
 		iconType = "gear",
 	},
+	{
+		name = "Admin",
+		key = "admin",
+		color = COLORS.adminAccent,
+		iconType = "shield",
+		adminOnly = true,
+	},
 }
+
+-- Calculate panel width based on admin status
+local visibleCount = 3  -- always at least 3 (Teleport, Profile, Settings)
+-- Admin button is added later once we know admin status
 
 local featureButtons = {}
 
-for i, feature in ipairs(FEATURES) do
+local visibleIndex = 0
+for _, feature in ipairs(FEATURES) do
+	-- Skip admin-only features for non-admins
+	if feature.adminOnly and not isAdmin then
+		continue
+	end
+	visibleIndex += 1
+
 	-- Use TextButton directly so it receives clicks natively
 	local btnFrame = Instance.new("TextButton")
 	btnFrame.Name = feature.key
 	btnFrame.Size = UDim2.new(0, FEATURE_BTN_SIZE, 0, FEATURE_BTN_SIZE)
-	btnFrame.Position = UDim2.new(0, FEATURE_BTN_START_X + (i - 1) * FEATURE_BTN_STEP_X, 0.5, 0)
+	btnFrame.Position = UDim2.new(0, FEATURE_BTN_START_X + (visibleIndex - 1) * FEATURE_BTN_STEP_X, 0.5, 0)
 	btnFrame.AnchorPoint = Vector2.new(0, 0.5)
 	btnFrame.BackgroundColor3 = COLORS.card
 	btnFrame.BackgroundTransparency = 0.15
@@ -212,6 +248,8 @@ for i, feature in ipairs(FEATURES) do
 		iconImage.Image = "rbxassetid://6034287594" -- Person/user icon
 	elseif feature.iconType == "gear" then
 		iconImage.Image = "rbxassetid://6031280882" -- Gear/settings icon
+	elseif feature.iconType == "shield" then
+		iconImage.Image = "rbxassetid://6031075938" -- Shield/admin icon
 	end
 
 	-- Label (non-interactive)
@@ -242,6 +280,14 @@ for i, feature in ipairs(FEATURES) do
 	featureButtons[feature.key] = btnFrame
 end
 
+-- Calculate panel width based on visible button count
+local actualVisibleCount = visibleIndex
+local ACTUAL_HUB_PANEL_WIDTH = IS_SMALL_SCREEN
+	and (10 + actualVisibleCount * 76 + 10)
+	or  (14 + actualVisibleCount * 88 + 14)
+
+hubPanel.Size = UDim2.new(0, ACTUAL_HUB_PANEL_WIDTH, 0, HUB_PANEL_HEIGHT)
+
 -- -------------------------------------------
 -- HUB OPEN / CLOSE
 -- -------------------------------------------
@@ -252,9 +298,9 @@ local function openHub()
 	isHubOpen = true
 	hubPanel.Visible = true
 	hubPanel.BackgroundTransparency = 1
-	hubPanel.Size = UDim2.new(0, HUB_PANEL_WIDTH, 0, 10)
+	hubPanel.Size = UDim2.new(0, ACTUAL_HUB_PANEL_WIDTH, 0, 10)
 	tween(hubPanel, {
-		Size = UDim2.new(0, HUB_PANEL_WIDTH, 0, HUB_PANEL_HEIGHT),
+		Size = UDim2.new(0, ACTUAL_HUB_PANEL_WIDTH, 0, HUB_PANEL_HEIGHT),
 		BackgroundTransparency = 0.05,
 	}, ANIMATION_TIME, Enum.EasingStyle.Back)
 	-- Rotate hub button to indicate open
@@ -266,7 +312,7 @@ local function closeHub()
 	if not isHubOpen then return end
 	isHubOpen = false
 	tween(hubPanel, {
-		Size = UDim2.new(0, HUB_PANEL_WIDTH, 0, 10),
+		Size = UDim2.new(0, ACTUAL_HUB_PANEL_WIDTH, 0, 10),
 		BackgroundTransparency = 1,
 	}, ANIMATION_TIME * 0.7)
 	tween(hubButton, { Rotation = 0 }, ANIMATION_TIME * 0.7)
@@ -367,4 +413,20 @@ featureButtons.settings.MouseButton1Click:Connect(function()
 	end
 end)
 
+-- ADMIN PANEL
+if featureButtons.admin then
+	featureButtons.admin.MouseButton1Click:Connect(function()
+		closeHub()
+		task.wait(0.15)
+		if _G.OpenAdminPanel then
+			_G.OpenAdminPanel()
+		else
+			warn("[FeaturesHubGui] Admin panel not ready - _G.OpenAdminPanel is nil")
+		end
+	end)
+end
+
 print("[FeaturesHubGui] Features hub initialized. Press Tab or tap the hub button.")
+
+print("[FeaturesHubGui] Features hub initialized. Press Tab or tap the hub button.")
+
