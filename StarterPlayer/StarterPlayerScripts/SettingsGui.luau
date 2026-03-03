@@ -1,7 +1,7 @@
 --[[
-    SettingsGui.lua  (Redesigned — Mobile-First)
+    SettingsGui.lua  (Redesigned ï¿½ Mobile-First)
     Clean scrollable list. Each row is full-width, 68 px tall.
-    Toggle: 56 × 32 track, slides + colour-tweens. All tap targets = 44 px.
+    Toggle: 56 ï¿½ 32 track, slides + colour-tweens. All tap targets = 44 px.
 
     FIXES:
     - Mobile uses UDim2 SCALE (not offset) so panel never overflows screen
@@ -13,9 +13,22 @@ local Players      = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local Lighting     = game:GetService("Lighting")
 local RunService   = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local SettingsEvent = ReplicatedStorage:FindFirstChild("SettingsEvent")
+local SettingsValuesEvent = ReplicatedStorage:FindFirstChild("SettingsValuesEvent")
+
+local initialLabelEffect = true
+if SettingsValuesEvent and SettingsValuesEvent:IsA("RemoteFunction") then
+	local ok, serverSettings = pcall(function()
+		return SettingsValuesEvent:InvokeServer()
+	end)
+	if ok and type(serverSettings) == "table" and type(serverSettings.LabelEffects) == "boolean" then
+		initialLabelEffect = serverSettings.LabelEffects
+	end
+end
 
 -- ------------------------------------------
 -- COLOURS
@@ -60,7 +73,7 @@ local PANEL_OPEN_SIZE, PANEL_CLOSED_SIZE
 
 if IS_SMALL_SCREEN then
 	-- Bottom of panel lands ~75% down screen, leaving 25% gap to purple button
-	-- Purple button sits at Y=1 offset -20px, so panel bottom ˜ 0.82 of screen
+	-- Purple button sits at Y=1 offset -20px, so panel bottom ï¿½ 0.82 of screen
 	PANEL_OPEN_SIZE   = UDim2.new(0.97, 0, 1, 0)
 	PANEL_CLOSED_SIZE = UDim2.new(0.97, 0, 0,   10)
 else
@@ -83,7 +96,7 @@ screenGui.SafeAreaCompatibility = Enum.SafeAreaCompatibility.FullscreenExtension
 screenGui.Parent                = playerGui
 
 -- ------------------------------------------
--- PANEL — dead-centred via AnchorPoint 0.5,0.5
+-- PANEL ï¿½ dead-centred via AnchorPoint 0.5,0.5
 -- ------------------------------------------
 local panel = Instance.new("Frame")
 panel.Name                   = "SettingsPanel"
@@ -258,7 +271,7 @@ local function createToggleRow(label, description, key, default)
 	descLabel.TextXAlignment     = Enum.TextXAlignment.Left
 	descLabel.Parent             = row
 
-	-- Toggle track (56 × 32)
+	-- Toggle track (56 ï¿½ 32)
 	local track = Instance.new("Frame")
 	track.Name             = "Track"
 	track.Size             = UDim2.new(0, 56, 0, 32)
@@ -268,7 +281,7 @@ local function createToggleRow(label, description, key, default)
 	track.Parent           = row
 	Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
 
-	-- Knob (28 × 28)
+	-- Knob (28 ï¿½ 28)
 	local knob = Instance.new("Frame")
 	knob.Name             = "Knob"
 	knob.Size             = UDim2.new(0, 28, 0, 28)
@@ -330,6 +343,7 @@ createToggleRow("Black & White", "Desaturate all colors", "blackAndWhite",false)
 createToggleRow("Night Mode",    "Switch to nighttime",   "nightMode",    false)
 createToggleRow("Shadows",       "Toggle global shadows", "shadows",      true)
 createToggleRow("Fog",           "Atmospheric fog",       "fog",          false)
+createToggleRow("Label Effect",  "Show overhead particles", "labelEffect", initialLabelEffect)
 
 -- Apply shadow default immediately so Lighting matches the UI on load
 Lighting.GlobalShadows = settingsState.shadows
@@ -344,12 +358,13 @@ local function setWindEnabled(en)
 	if wc then wc:SetAttribute("WindEnabled", en) end
 end
 
--- -- Delta tracking — only write to Lighting when state actually changes --
+-- -- Delta tracking ï¿½ only write to Lighting when state actually changes --
 local lastWind   = false
 local lastBW     = false
 local lastNight  = false
 local lastShadow = true   -- matches default above
 local lastFog    = false
+local lastLabelEffect = settingsState.labelEffect
 
 player.CharacterAdded:Connect(function()
 	setWindEnabled(settingsState.wind == true)
@@ -378,6 +393,12 @@ RunService.RenderStepped:Connect(function()
 	if settingsState.fog ~= lastFog then
 		fogAtmosphere.Parent = settingsState.fog and Lighting or nil
 		lastFog = settingsState.fog
+	end
+	if settingsState.labelEffect ~= lastLabelEffect then
+		if SettingsEvent then
+			SettingsEvent:FireServer("LabelEffects", settingsState.labelEffect)
+		end
+		lastLabelEffect = settingsState.labelEffect
 	end
 end)
 
@@ -414,4 +435,4 @@ closeBtn.MouseLeave:Connect(function() tw(closeBtn, { BackgroundColor3 = C.row }
 _G.OpenSettingsPanel  = openSettings
 _G.CloseSettingsPanel = closeSettings
 
-print("[SettingsGui] Ready — mobile scale-based layout active.")
+print("[SettingsGui] Ready ï¿½ mobile scale-based layout active.")
