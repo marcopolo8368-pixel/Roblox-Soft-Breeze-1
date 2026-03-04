@@ -62,6 +62,18 @@ local RequestRepCooldown = Instance.new("RemoteFunction")
 RequestRepCooldown.Name = "RequestRepCooldown"
 RequestRepCooldown.Parent = RemotesFolder
 
+local AdminRepEvent = Instance.new("RemoteEvent")
+AdminRepEvent.Name = "AdminRepEvent"
+AdminRepEvent.Parent = RemotesFolder
+
+local AdminRepResponse = Instance.new("RemoteEvent")
+AdminRepResponse.Name = "AdminRepResponse"
+AdminRepResponse.Parent = RemotesFolder
+
+local AdminRepCanUse = Instance.new("RemoteFunction")
+AdminRepCanUse.Name = "AdminRepCanUse"
+AdminRepCanUse.Parent = RemotesFolder
+
 -- -------------------------------------------
 -- EMOTE SYSTEM
 -- -------------------------------------------
