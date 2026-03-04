@@ -24,42 +24,42 @@ end
 local CurrentSettings = {}
 
 -- Player Collision: CollisionGroupService exists in newer Roblox. Use pcall for compatibility.
-local CollisionGroupService
+local PhysicsService
 local success, service = pcall(function()
-	return game:GetService("CollisionGroupService")
+	return game:GetService("PhysicsService")
 end)
-CollisionGroupService = success and service or nil
+PhysicsService = success and service or nil
 
 local function setupCollisionGroups()
-	if not CollisionGroupService then return end
+	if not PhysicsService then return end
 	pcall(function()
-		CollisionGroupService:RegisterCollisionGroup("PlayersNormal")
-		CollisionGroupService:RegisterCollisionGroup("PlayersNoCollide")
-		CollisionGroupService:SetCollisionGroupPairState("PlayersNormal", "PlayersNormal", Enum.CollisionGroupState.Default)
-		CollisionGroupService:SetCollisionGroupPairState("PlayersNoCollide", "PlayersNoCollide", Enum.CollisionGroupState.Invisible)
+		PhysicsService:RegisterCollisionGroup("PlayersNormal")
+		PhysicsService:RegisterCollisionGroup("PlayersNoCollide")
+		PhysicsService:CollisionGroupSetCollidable("PlayersNormal", "PlayersNormal", true)
+		PhysicsService:CollisionGroupSetCollidable("PlayersNoCollide", "PlayersNoCollide", false)
 	end)
 end
 setupCollisionGroups()
 
 local function setPlayerCollision(player, enabled)
-	if not CollisionGroupService then return end
+	if not PhysicsService then return end
 	local character = player.Character
 	if not character then return end
 	for _, part in pairs(character:GetDescendants()) do
 		if part:IsA("BasePart") then
-			part.CollisionGroup = enabled and "PlayersNormal" or "PlayersNoCollide"
+			PhysicsService:SetPartCollisionGroup(part, enabled and "PlayersNormal" or "PlayersNoCollide")
 		end
 	end
 end
 
 local function applyCollisionToAll(enabled)
-	if not CollisionGroupService then return end
+	if not PhysicsService then return end
 	for _, p in pairs(Players:GetPlayers()) do
 		setPlayerCollision(p, enabled)
 	end
 end
 
-if CollisionGroupService then
+if PhysicsService then
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function()
 			if CurrentSettings["PlayerCollision"] == false then
@@ -147,21 +147,41 @@ local function applySetting(name, value)
 
 	elseif name == "PlayerCollision" then
 		applyCollisionToAll(value)
+
+	elseif name == "LabelEffects" then
+		-- Handled per-player in the event handler below; nothing global here
 	end
 end
 
 -- Receive settings from client
 SettingsEvent.OnServerEvent:Connect(function(player, settingName, value)
 	if type(settingName) ~= "string" or type(value) ~= "boolean" then return end
+
+	-- LabelEffects is per-player (local only), not server-wide
+	if settingName == "LabelEffects" then
+		player:SetAttribute("LabelEffectsEnabled", value)
+		return
+	end
+
 	local validSettings = {
 		Shadows = true, DayNight = true, BlackWhite = true,
 		Wind = true, Fog = true,
-		Music = true, PlayerCollision = true
+		Music = true, PlayerCollision = true,
 	}
 	if validSettings[settingName] then
 		applySetting(settingName, value)
 	end
 end)
+
+Players.PlayerAdded:Connect(function(player)
+	player:SetAttribute("LabelEffectsEnabled", true)
+end)
+
+for _, player in pairs(Players:GetPlayers()) do
+	if player:GetAttribute("LabelEffectsEnabled") == nil then
+		player:SetAttribute("LabelEffectsEnabled", true)
+	end
+end
 
 -- Send current settings to client when they request
 local SettingsValuesEvent = ReplicatedStorage:FindFirstChild("SettingsValuesEvent")
@@ -182,10 +202,12 @@ local defaults = {
 	Wind = true,
 	Fog = false,
 	Music = false,
-	PlayerCollision = true
+	PlayerCollision = true,
+	LabelEffects = true,
 }
 for k, v in pairs(defaults) do
 	if CurrentSettings[k] == nil then
 		applySetting(k, v)
 	end
 end
+
