@@ -13,20 +13,20 @@
       area where the nametag sits.
 
       HOW TO SWAP IN YOUR CUSTOM IMAGES:
-        1. Upload your image to Roblox (Toolbox → My Decals → Get Asset ID)
+        1. Upload your image to Roblox (Toolbox ? My Decals ? Get Asset ID)
         2. Find the TIER_PARTICLES table below
         3. Replace the `texture` value for the relevant tier with:
                "rbxassetid://YOUR_ASSET_ID_HERE"
         4. Each tier has a comment describing what style it should look like
 
     TIER PARTICLE STYLES:
-      Visitor     → soft drifting dust (barely there)
-      Shady       → smoky red wisps flickering
-      Rising      → crisp blue upward sparks
-      Famous      → warm gold floating stars
-      Trendsetter → purple+pink swirling orbs
-      Influencer  → bright pink fast sparkle burst
-      Celebrity   → golden royal large sparkles + extra emitter
+      Visitor     ? NO particles (starting rank, particles are a reward)
+      Shady       ? smoky red wisps flickering
+      Rising      ? crisp blue upward sparks
+      Famous      ? warm gold floating stars
+      Trendsetter ? purple+pink swirling orbs
+      Influencer  ? bright pink fast sparkle burst
+      Celebrity   ? golden royal large sparkles + extra emitter
 ]]
 
 local Players           = game:GetService("Players")
@@ -36,22 +36,17 @@ local TweenService      = game:GetService("TweenService")
 local Remotes             = ReplicatedStorage:WaitForChild("Remotes")
 local ReportPlatformEvent = Remotes:WaitForChild("ReportPlatform")
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- CONFIGURATION
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 local MAX_DISTANCE     = 60
 local BILLBOARD_WIDTH  = 6
 local BILLBOARD_HEIGHT = 1.8
 local STUDS_OFFSET     = Vector3.new(0, 2.6, 0)
 
--- The invisible part that holds emitters sits this far above the head center
--- so particles appear around the nametag area, not inside the skull
-local EMITTER_OFFSET = Vector3.new(0, 2.2, 0)
--- Size of the invisible volume part particles spawn randomly inside
--- Width covers the nametag, height is thin, depth is shallow
+local EMITTER_OFFSET    = Vector3.new(0, 2.2, 0)
 local EMITTER_PART_SIZE = Vector3.new(3.2, 1.2, 1)
-local DEBUG_AURA_LOGS = true
-local DEBUG_VISITOR_CONTROL_EMITTER = true
+local DEBUG_AURA_LOGS   = true
 
 -- Reaction burst icon textures (replace with your uploaded Image IDs)
 local REACTION_TEXTURES = {
@@ -84,286 +79,34 @@ local COLORS = {
 	textStroke = Color3.fromRGB(20,  12,  40),
 }
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- TIER PARTICLE DEFINITIONS
 --
 -- Each tier is a list of emitter configs (Celebrity gets 2).
 -- Properties map 1:1 to ParticleEmitter properties.
 --
--- texture      → REPLACE with "rbxassetid://YOUR_ID"
+-- texture      ? REPLACE with "rbxassetid://YOUR_ID"
 --               Roblox built-in fallback textures are used by default so
 --               you can see something in-game before swapping.
 --
--- ⚠️  IMPORTANT: Use the IMAGE asset ID, NOT the DECAL asset ID!
+-- ??  IMPORTANT: Use the IMAGE asset ID, NOT the DECAL asset ID!
 --     When you upload a Decal, Roblox gives you a Decal ID, but the
 --     ParticleEmitter.Texture property needs the underlying IMAGE ID.
 --     To find it: Insert a Decal into a Part in Studio, paste your
 --     Decal ID into the Texture property, then look at what Studio
---     resolves it to in the Properties panel — that's the Image ID.
+--     resolves it to in the Properties panel � that's the Image ID.
 --     (They are different numbers!)
 --
 -- Built-in texture IDs you can use as placeholders:
 --   Star/sparkle:  "rbxassetid://6101261905"
 --   Soft circle:   "rbxassetid://243660364"
 --   Smoke wisp:    "rbxassetid://1369397597"
--- ─────────────────────────────────────────────────────────────
-local TIER_PARTICLES = {
+-- -------------------------------------------------------------
+local TIER_PARTICLES = {}
 
-	Visitor = {
-		{
-			-- STYLE: barely-there soft lavender dust drifting upward
-			texture      = "rbxassetid://114933475941677",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0,   Color3.fromRGB(200, 185, 255)),
-				ColorSequenceKeypoint.new(1,   Color3.fromRGB(160, 140, 210)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.75),
-				NumberSequenceKeypoint.new(0.3, 0.6),
-				NumberSequenceKeypoint.new(0.7, 0.85),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.15, 0.5),
-				NumberSequenceKeypoint.new(0.7, 0.4),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 3,
-			speed        = NumberRange.new(0.02, 0.08),
-			lifetime     = NumberRange.new(2.0, 3.5),
-			rotation     = NumberRange.new(0, 360),
-			rotSpeed     = NumberRange.new(-8, 8),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-	},
-
-	Shady = {
-		{
-			-- STYLE: dark red smoky wisps flickering low and slow
-			texture      = "rbxassetid://132991258217907",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0,   Color3.fromRGB(200, 50,  60)),
-				ColorSequenceKeypoint.new(0.4, Color3.fromRGB(140, 30,  40)),
-				ColorSequenceKeypoint.new(1,   Color3.fromRGB(60,  10,  15)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.75),
-				NumberSequenceKeypoint.new(0.3, 0.55),
-				NumberSequenceKeypoint.new(0.7, 0.8),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.2, 0.6),
-				NumberSequenceKeypoint.new(0.8, 0.8),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 3,
-			speed        = NumberRange.new(0.02, 0.08),
-			lifetime     = NumberRange.new(1.5, 2.8),
-			rotation     = NumberRange.new(0, 0),
-			rotSpeed     = NumberRange.new(0, 0),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-	},
-
-	Rising = {
-		{
-			-- STYLE: crisp blue sparks drifting upward
-			texture      = "rbxassetid://91121509552328",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0,   Color3.fromRGB(170, 220, 255)),
-				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(100, 175, 255)),
-				ColorSequenceKeypoint.new(1,   Color3.fromRGB(60,  120, 230)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.65),
-				NumberSequenceKeypoint.new(0.25, 0.4),
-				NumberSequenceKeypoint.new(0.7, 0.75),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.1, 0.45),
-				NumberSequenceKeypoint.new(0.6, 0.35),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 2,
-			speed        = NumberRange.new(0.02, 0.1),
-			lifetime     = NumberRange.new(1.2, 2.2),
-			rotation     = NumberRange.new(0, 360),
-			rotSpeed     = NumberRange.new(-10, 10),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-	},
-
-	Famous = {
-		{
-			-- STYLE: warm golden floating stars drifting gently
-			texture      = "rbxassetid://78729481165822",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 235, 120)),
-				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 60)),
-				ColorSequenceKeypoint.new(1,   Color3.fromRGB(210, 155, 30)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.6),
-				NumberSequenceKeypoint.new(0.25, 0.35),
-				NumberSequenceKeypoint.new(0.7, 0.7),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.15, 0.55),
-				NumberSequenceKeypoint.new(0.6, 0.45),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 4,
-			speed        = NumberRange.new(0.02, 0.08),
-			lifetime     = NumberRange.new(1.8, 3.0),
-			rotation     = NumberRange.new(0, 360),
-			rotSpeed     = NumberRange.new(-6, 6),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-	},
-
-	Trendsetter = {
-		{
-			-- STYLE: swirling purple/pink orbs drifting elegantly
-			texture      = "rbxassetid://100190690567564",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0,   Color3.fromRGB(210, 150, 255)),
-				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 130, 220)),
-				ColorSequenceKeypoint.new(1,   Color3.fromRGB(170, 90,  210)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.6),
-				NumberSequenceKeypoint.new(0.2, 0.3),
-				NumberSequenceKeypoint.new(0.65, 0.65),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.15, 0.3),
-				NumberSequenceKeypoint.new(0.6, 0.25),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 4,
-			speed        = NumberRange.new(0.02, 0.1),
-			lifetime     = NumberRange.new(1.5, 2.5),
-			rotation     = NumberRange.new(0, 360),
-			rotSpeed     = NumberRange.new(-15, 15),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-	},
-
-	Influencer = {
-		{
-			-- STYLE: lively hot-pink sparkles swirling outward
-			texture      = "rbxassetid://130257556512890",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 170, 235)),
-				ColorSequenceKeypoint.new(0.4, Color3.fromRGB(255, 100, 210)),
-				ColorSequenceKeypoint.new(1,   Color3.fromRGB(210, 60,  175)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.55),
-				NumberSequenceKeypoint.new(0.2, 0.25),
-				NumberSequenceKeypoint.new(0.6, 0.6),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.1, 0.5),
-				NumberSequenceKeypoint.new(0.5, 0.35),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 4,
-			speed        = NumberRange.new(0.03, 0.12),
-			lifetime     = NumberRange.new(1.0, 2.0),
-			rotation     = NumberRange.new(0, 360),
-			rotSpeed     = NumberRange.new(-18, 18),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-	},
-
-	Celebrity = {
-		{
-			-- STYLE: slow majestic golden sparkles floating outward
-			texture      = "rbxassetid://131732621816757",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 245, 140)),
-				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 215, 60)),
-				ColorSequenceKeypoint.new(1,   Color3.fromRGB(225, 170, 30)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.9),
-				NumberSequenceKeypoint.new(0.35, 0.35),
-				NumberSequenceKeypoint.new(0.8, 0.35),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.35, 0.6),
-				NumberSequenceKeypoint.new(0.8, 0.6),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 3,
-			speed        = NumberRange.new(0.005, 0.03),
-			lifetime     = NumberRange.new(3.5, 5.0),
-			rotation     = NumberRange.new(0, 0),
-			rotSpeed     = NumberRange.new(0, 0),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-		{
-			-- STYLE: second emitter — tiny gentle gold accents
-			texture      = "rbxassetid://87423136492463",
-			color        = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 210)),
-				ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 210, 90)),
-			}),
-			transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.9),
-				NumberSequenceKeypoint.new(0.35, 0.45),
-				NumberSequenceKeypoint.new(0.8, 0.45),
-				NumberSequenceKeypoint.new(1,   1),
-			}),
-			size         = NumberSequence.new({
-				NumberSequenceKeypoint.new(0,   0.0),
-				NumberSequenceKeypoint.new(0.35, 0.28),
-				NumberSequenceKeypoint.new(0.8, 0.22),
-				NumberSequenceKeypoint.new(1,   0.0),
-			}),
-			rate         = 4,
-			speed        = NumberRange.new(0.005, 0.03),
-			lifetime     = NumberRange.new(2.0, 3.2),
-			rotation     = NumberRange.new(0, 0),
-			rotSpeed     = NumberRange.new(0, 0),
-			spread       = 180,
-			lightEmission  = 1.0,
-			lightInfluence = 0.0,
-		},
-	},
-}
-
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- PER-PLAYER STATE
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 local platforms = {}
 local repTitles = {}
 local labelEffectsEnabled = {}
@@ -379,9 +122,9 @@ local function isLabelEffectsEnabled(player)
 	return explicit == true
 end
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- HELPERS
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 local function tblColor(t)
 	if type(t) == "table" and #t >= 3 then
 		return Color3.fromRGB(t[1], t[2], t[3])
@@ -434,7 +177,6 @@ local function playReactionAura(character, action)
 
 	clearReactionAura(character)
 
-	-- Anchor to the torso/root so particles burst from the character's center
 	local root = character:FindFirstChild("HumanoidRootPart") or head
 	dlog("playReactionAura CREATING burst", action, "on", character.Name, "texture=", texture, "anchor=", root.Name)
 
@@ -460,8 +202,6 @@ local function playReactionAura(character, action)
 	emitter.Texture = texture
 	emitter.LightEmission = 1
 	emitter.LightInfluence = 0
-	-- NOTE: :Emit() does NOT replicate from server to clients.
-	-- We use a brief high Rate instead, which DOES replicate.
 
 	if action == "love" then
 		emitter.Color = ColorSequence.new(
@@ -483,7 +223,7 @@ local function playReactionAura(character, action)
 		emitter.Rotation = NumberRange.new(0, 360)
 		emitter.RotSpeed = NumberRange.new(-90, 90)
 		emitter.SpreadAngle = Vector2.new(180, 180)
-		emitter.Rate = 200         -- burst: high Rate for a short window
+		emitter.Rate = 200
 		emitter.Enabled = true
 		emitter.Parent = auraPart
 		dlog("love burst started (Rate=200 for 0.25s)")
@@ -511,13 +251,12 @@ local function playReactionAura(character, action)
 		emitter.Rotation = NumberRange.new(0, 360)
 		emitter.RotSpeed = NumberRange.new(-30, 30)
 		emitter.SpreadAngle = Vector2.new(150, 150)
-		emitter.Rate = 120         -- burst: high Rate for a short window
+		emitter.Rate = 120
 		emitter.Enabled = true
 		emitter.Parent = auraPart
 		dlog(action, "burst started (Rate=120 for 0.25s)")
 	end
 
-	-- Stop emitting after a brief burst window, then clean up
 	task.delay(0.25, function()
 		if emitter and emitter.Parent then
 			emitter.Enabled = false
@@ -531,10 +270,9 @@ local function playReactionAura(character, action)
 	end)
 end
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- PARTICLE AURA BUILDER
--- Creates/replaces the aura part on the character with emitters
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 local function applyParticleAura(character, title)
 	local head = character:FindFirstChild("Head")
 	if not head then
@@ -549,18 +287,23 @@ local function applyParticleAura(character, title)
 		return
 	end
 
-	-- Remove old aura containers
 	clearParticleAura(character)
 
 	local configs = TIER_PARTICLES[title]
+	-- Empty table = Visitor (no particles by design), nil = unknown tier
 	if not configs then
 		dlog("applyParticleAura aborted: no configs for title", title)
 		return
 	end
 
+	-- Visitor has an empty table � skip cleanly with no errors
+	if #configs == 0 then
+		dlog("applyParticleAura skipped: Visitor has no particles by design")
+		return
+	end
+
 	dlog("applyParticleAura start", character.Name, "title=", title, "emitters=", #configs)
 
-	-- Invisible volume Part — particles spawn at random positions inside it
 	local auraPart = Instance.new("Part")
 	auraPart.Name          = "TierAuraPart"
 	auraPart.Size          = EMITTER_PART_SIZE
@@ -571,13 +314,9 @@ local function applyParticleAura(character, title)
 	auraPart.Massless      = true
 	auraPart.Anchored      = false
 	auraPart.CastShadow    = false
+	auraPart.CFrame        = head.CFrame * CFrame.new(EMITTER_OFFSET)
+	auraPart.Parent        = character
 
-	-- CRITICAL: position the part BEFORE parenting to avoid teleport glitch
-	-- (an unanchored part at world origin briefly drags the character)
-	auraPart.CFrame = head.CFrame * CFrame.new(EMITTER_OFFSET)
-	auraPart.Parent = character
-
-	-- Weld AFTER both parts share a common ancestor and are positioned
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0  = head
 	weld.Part1  = auraPart
@@ -585,7 +324,6 @@ local function applyParticleAura(character, title)
 
 	dlog("aura part created", auraPart:GetFullName(), "size=", tostring(EMITTER_PART_SIZE))
 
-	-- One emitter per config (Celebrity has 2)
 	for _, cfg in ipairs(configs) do
 		local emitter = Instance.new("ParticleEmitter")
 		emitter.Texture        = cfg.texture
@@ -605,41 +343,12 @@ local function applyParticleAura(character, title)
 		dlog("emitter created", "texture=", cfg.texture, "rate=", cfg.rate)
 	end
 
-	if DEBUG_VISITOR_CONTROL_EMITTER and title == "Visitor" then
-		local control = Instance.new("ParticleEmitter")
-		control.Texture = "rbxassetid://243660364"
-		control.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(1, 1, 1))
-		control.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.7),
-			NumberSequenceKeypoint.new(0.3, 0.5),
-			NumberSequenceKeypoint.new(0.7, 0.8),
-			NumberSequenceKeypoint.new(1, 1),
-		})
-		control.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.0),
-			NumberSequenceKeypoint.new(0.15, 0.08),
-			NumberSequenceKeypoint.new(0.7, 0.06),
-			NumberSequenceKeypoint.new(1, 0),
-		})
-		control.Rate = 5
-		control.Speed = NumberRange.new(0.02, 0.08)
-		control.Lifetime = NumberRange.new(2.0, 3.0)
-		control.Rotation = NumberRange.new(0, 360)
-		control.RotSpeed = NumberRange.new(-8, 8)
-		control.SpreadAngle = Vector2.new(180, 180)
-		control.LightEmission = 1.0
-		control.LightInfluence = 0.0
-		control.Enabled = true
-		control.Parent = auraPart
-		dlog("visitor control emitter created", "rate=5")
-	end
-
 	dlog("applyParticleAura complete", character.Name, title)
 end
 
--- ─────────────────────────────────────────────────────────────
--- TITLE UPGRADE BURST  (fires once on rank-up, then cleans up)
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
+-- TITLE UPGRADE BURST
+-- -------------------------------------------------------------
 local function playUpgradeBurst(character, tierColor)
 	local head = character:FindFirstChild("Head")
 	if not head then return end
@@ -652,7 +361,6 @@ local function playUpgradeBurst(character, tierColor)
 	local fxColor = tblColor(tierColor)
 
 	local burst = Instance.new("ParticleEmitter")
-	-- REPLACE texture → your "level up" flash image
 	burst.Texture        = "rbxassetid://6101261905"
 	burst.Color          = ColorSequence.new({
 		ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 255, 255)),
@@ -668,7 +376,7 @@ local function playUpgradeBurst(character, tierColor)
 		NumberSequenceKeypoint.new(0, 0.3),
 		NumberSequenceKeypoint.new(1, 0),
 	})
-	burst.Rate           = 0  -- use Emit() for one-shot
+	burst.Rate           = 0
 	burst.Speed          = NumberRange.new(3, 6)
 	burst.Lifetime       = NumberRange.new(0.6, 1.2)
 	burst.Rotation       = NumberRange.new(0, 360)
@@ -687,9 +395,9 @@ local function playUpgradeBurst(character, tierColor)
 	end)
 end
 
--- ─────────────────────────────────────────────────────────────
--- APPLY REP VISUALS  (nametag text colors + particle tier swap)
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
+-- APPLY REP VISUALS
+-- -------------------------------------------------------------
 local function applyRepVisuals(billboard, repInfo, character)
 	if not billboard or not repInfo then return end
 	local main = billboard:FindFirstChild("Main")
@@ -709,8 +417,26 @@ local function applyRepVisuals(billboard, repInfo, character)
 	dlog("applyRepVisuals", "score=", score, "title=", title, "hasCharacter=", character ~= nil)
 
 	if titleLabel then
-		titleLabel.Text       = title
-		titleLabel.TextColor3 = TIERS_COLORS[title] or tblColor(color)
+		-- Custom title (from gamepass) overrides the tier title
+		local player = Players:GetPlayerFromCharacter(character or (billboard and billboard.Parent and billboard.Parent.Parent))
+		local customTitle = player and player:GetAttribute("CustomTitle")
+		if customTitle and customTitle ~= "" then
+			titleLabel.Text       = customTitle
+			titleLabel.TextColor3 = Color3.new(1, 1, 1) -- animator handles gradient color
+		else
+			titleLabel.Text = title
+			if title == "Visitor" then
+				titleLabel.TextColor3 = TIERS_COLORS["Visitor"] or tblColor(color)
+				titleLabel.Font = Enum.Font.GothamMedium
+				-- Clear gradient for Visitor (no animated title)
+				local oldGrad = titleLabel:FindFirstChildOfClass("UIGradient")
+				if oldGrad then oldGrad:Destroy() end
+			else
+				-- Non-Visitor tiers: set white so client gradient animator can overlay
+				titleLabel.TextColor3 = Color3.new(1, 1, 1)
+				titleLabel.Font = Enum.Font.GothamBold
+			end
+		end
 	end
 
 	if nameLabel then
@@ -729,15 +455,14 @@ local function applyRepVisuals(billboard, repInfo, character)
 		repSymbol.Visible = false
 	end
 
-	-- Swap particle aura to match new tier
 	if character then
 		applyParticleAura(character, title)
 	end
 end
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- BUILD OVERHEAD LABEL
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 local function createOverheadLabel(character, player)
 	local head = character:WaitForChild("Head", 5)
 	if not head then return end
@@ -791,7 +516,7 @@ local function createOverheadLabel(character, player)
 	layout.Padding             = UDim.new(0.02, 0)
 	layout.Parent              = main
 
-	-- ── ROW 1: Title ─────────────────────────────────────────────────
+	-- -- ROW 1: Title -------------------------------------------------
 	local titleRow = Instance.new("Frame")
 	titleRow.Name                   = "TitleRow"
 	titleRow.Size                   = UDim2.new(1, 0, 0.22, 0)
@@ -815,7 +540,7 @@ local function createOverheadLabel(character, player)
 	titleStroke.Thickness    = 0.8
 	titleStroke.Parent       = titleLabel
 
-	-- ── ROW 2: Name ──────────────────────────────────────────────────
+	-- -- ROW 2: Name --------------------------------------------------
 	local nameRow = Instance.new("Frame")
 	nameRow.Name                   = "NameRow"
 	nameRow.Size                   = UDim2.new(1, 0, 0.34, 0)
@@ -860,7 +585,7 @@ local function createOverheadLabel(character, player)
 	nameStroke.Color = COLORS.textStroke; nameStroke.Transparency = 0.25
 	nameStroke.Thickness = 1; nameStroke.Parent = nameLabel
 
-	-- ── ROW 3: @username ─────────────────────────────────────────────
+	-- -- ROW 3: @username ---------------------------------------------
 	local bottomRow = Instance.new("Frame")
 	bottomRow.Name                   = "BottomRow"
 	bottomRow.Size                   = UDim2.new(0.85, 0, 0.2, 0)
@@ -885,17 +610,15 @@ local function createOverheadLabel(character, player)
 	local repInfo = repTitles[player]
 	if repInfo then
 		applyRepVisuals(billboard, repInfo, character)
-	else
-		-- No rep data yet — still show the default Visitor aura
-		applyParticleAura(character, "Visitor")
 	end
+	-- Visitors get no particles � nothing to apply on first join
 
 	return billboard
 end
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- UTILITY
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 local function getBillboard(player)
 	local character = player.Character
 	if not character then return nil end
@@ -915,9 +638,9 @@ local function setPlatformIcon(player, platform)
 	if icon then icon.Text = PLATFORM_SYMBOLS[platform] or PLATFORM_SYMBOLS.Unknown end
 end
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- REMOTES
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 ReportPlatformEvent.OnServerEvent:Connect(function(player, platform)
 	if type(platform) ~= "string" then return end
 	local valid = { PC = true, Mobile = true, Console = true }
@@ -964,27 +687,34 @@ repBindable.Event:Connect(function(payload)
 	end
 end)
 
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 -- PLAYER LIFECYCLE
--- ─────────────────────────────────────────────────────────────
+-- -------------------------------------------------------------
 local function onCharacterAdded(player, character)
 	task.wait(0.5)
 	dlog("onCharacterAdded", player.Name, character.Name)
 	createOverheadLabel(character, player)
-	-- Reapply particle aura after respawn
 	local repInfo = repTitles[player]
 	if repInfo then
 		dlog("reapplying aura after respawn", player.Name, repInfo.title)
 		applyParticleAura(character, repInfo.title or "Visitor")
-	else
-		dlog("no rep data yet, applying default Visitor aura", player.Name)
-		applyParticleAura(character, "Visitor")
 	end
+	-- Visitors get nothing on spawn � intentional
 end
 
 local function onPlayerAdded(player)
 	local attr = player:GetAttribute("LabelEffectsEnabled")
 	labelEffectsEnabled[player] = (attr ~= false)
+
+	-- Refresh overhead label when player sets/changes their custom title
+	player:GetAttributeChangedSignal("CustomTitle"):Connect(function()
+		local repInfo = repTitles[player]
+		if not repInfo then return end
+		local bb = getBillboard(player)
+		if bb then
+			applyRepVisuals(bb, repInfo, player.Character)
+		end
+	end)
 
 	player:GetAttributeChangedSignal("LabelEffectsEnabled"):Connect(function()
 		local enabled = player:GetAttribute("LabelEffectsEnabled")

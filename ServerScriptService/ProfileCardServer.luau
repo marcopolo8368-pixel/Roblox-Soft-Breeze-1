@@ -106,13 +106,16 @@ SaveProfileCardEvent.OnServerEvent:Connect(function(player, profileData)
 			and profileData.favoriteColor or { 138, 100, 214 },
 		bgGradientStart = type(profileData.bgGradientStart) == "table" 
 			and profileData.bgGradientStart or { 20, 20, 35 },
-		bgGradientEnd = type(profileData.bgGradientEnd) == "table" 
+		bgGradientEnd = type(profileData.bgGradientEnd) == "table"
 			and profileData.bgGradientEnd or { 40, 30, 60 },
-		cardStyle = type(profileData.cardStyle) == "string" 
+		bgImageId = type(profileData.bgImageId) == "string"
+			and string.sub(profileData.bgImageId, 1, 60) or "",
+		cardStyle = type(profileData.cardStyle) == "string"
 			and profileData.cardStyle or "default",
 	}
 
 	profileCache[player.UserId] = sanitized
+	print("[ProfileCardServer] Saved for", player.Name, "bgImageId:", tostring(sanitized.bgImageId))
 
 	-- Notify all other players that this player's card updated
 	ProfileCardUpdatedEvent:FireAllClients(player.UserId, sanitized)
@@ -129,6 +132,7 @@ RequestProfileCardFunc.OnServerInvoke = function(requestingPlayer, targetUserId)
 
 	local data = profileCache[targetUserId]
 	if data then
+		print("[ProfileCardServer] Returning card for userId", targetUserId, "bgImageId:", tostring(data.bgImageId))
 		return data
 	end
 

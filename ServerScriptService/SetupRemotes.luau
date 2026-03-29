@@ -75,14 +75,29 @@ AdminRepCanUse.Name = "AdminRepCanUse"
 AdminRepCanUse.Parent = RemotesFolder
 
 -- -------------------------------------------
--- EMOTE SYSTEM
+-- GAMEPASS / SHOP SYSTEM
 -- -------------------------------------------
-local PlayEmote = Instance.new("RemoteEvent")
-PlayEmote.Name = "PlayEmote"
-PlayEmote.Parent = RemotesFolder
+local CheckPassOwnership = Instance.new("RemoteFunction")
+CheckPassOwnership.Name = "CheckPassOwnership"
+CheckPassOwnership.Parent = RemotesFolder
 
-local StopEmote = Instance.new("RemoteEvent")
-StopEmote.Name = "StopEmote"
-StopEmote.Parent = RemotesFolder
+local SetCustomTitle = Instance.new("RemoteEvent")
+SetCustomTitle.Name = "SetCustomTitle"
+SetCustomTitle.Parent = RemotesFolder
+
+local OpenShopRequest = Instance.new("RemoteEvent")
+OpenShopRequest.Name = "OpenShopRequest"
+OpenShopRequest.Parent = RemotesFolder
+
+local AdminSimulatePass = Instance.new("RemoteEvent")
+AdminSimulatePass.Name = "AdminSimulatePass"
+AdminSimulatePass.Parent = RemotesFolder
+
+-- -------------------------------------------
+-- CHAT TAG SYSTEM
+-- -------------------------------------------
+local GetChatTag = Instance.new("RemoteFunction")
+GetChatTag.Name = "GetChatTag"
+GetChatTag.Parent = RemotesFolder
 
 print("[SetupRemotes] All remote events created successfully.")

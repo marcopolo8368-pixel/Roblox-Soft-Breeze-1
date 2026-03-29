@@ -37,6 +37,9 @@ local function dlog(...)
 	end
 end
 
+-- Forward declarations (defined further below)
+local fireRepSubscribers
+
 local COOLDOWN_SECONDS = 24 * 60 * 60
 local cooldownsEnabled = true  -- admin can toggle this off server-wide
 local ACTION_VALUES = {
@@ -66,6 +69,8 @@ local DEFAULT_REP = {
 	totalGiven = 0,
 	totalReceived = 0,
 	cooldownByTarget = {},
+	firstJoinTime = 0,       -- unix timestamp of very first join (0 = not set)
+	generousTargets = {},    -- tracks unique targets who received positive rep (for badge)
 }
 
 local repCache = {} -- [userId] = rep data
@@ -75,9 +80,9 @@ local pendingSaveTasks = {} -- [userId] = true
 local SAVE_DEBOUNCE_SECONDS = 8
 local SAVE_SCAN_INTERVAL_SECONDS = 30
 
--- ── ADMIN LIST ───────────────────────────────────────────────────────────────
+-- -- ADMIN LIST ---------------------------------------------------------------
 local ADMIN_IDS = {
-	[6163688260] = true,        -- ← replace with your UserId
+	[6163688260] = true,        -- ? replace with your UserId
 	-- [987654321] = true, -- add more admins like this
 }
 
@@ -87,6 +92,8 @@ local function cloneDefaultRep()
 		totalGiven = DEFAULT_REP.totalGiven,
 		totalReceived = DEFAULT_REP.totalReceived,
 		cooldownByTarget = {},
+		firstJoinTime = 0,
+		generousTargets = {},
 	}
 end
 
@@ -145,6 +152,15 @@ local function sanitizeLoadedData(data)
 			if expiresAt then
 				sanitized.cooldownByTarget[key] = expiresAt
 			end
+		end
+	end
+
+	sanitized.firstJoinTime = tonumber(data.firstJoinTime) or 0
+
+	if type(data.generousTargets) == "table" then
+		sanitized.generousTargets = {}
+		for k in pairs(data.generousTargets) do
+			sanitized.generousTargets[tostring(k)] = true
 		end
 	end
 
@@ -238,6 +254,19 @@ end
 
 local function loadRepForPlayer(player)
 	local repData = loadRepForUserId(player.UserId)
+
+	-- First-ever join: stamp the time and signal badge server
+	if repData.firstJoinTime == 0 then
+		repData.firstJoinTime = os.time()
+		markRepDirty(player.UserId)
+		task.spawn(function()
+			task.wait(1) -- give BadgeServer a moment to register its callback
+			if _G.OnFirstJoin then
+				_G.OnFirstJoin(player)
+			end
+		end)
+	end
+
 	local payload = buildRepPayload(player.UserId, repData)
 	if _G.FireRepUpdateForNametag then
 		_G.FireRepUpdateForNametag(payload)
@@ -282,6 +311,11 @@ local function pushRepUpdate(userId, repData, titleUpgraded)
 	else
 		dlog("nametag update skipped: _G.FireRepUpdateForNametag missing")
 	end
+	-- Update chat tag when rep changes
+	if _G.OnRepScoreChanged then
+		_G.OnRepScoreChanged(userId, repData.score)
+	end
+	fireRepSubscribers(userId, repData.score)
 end
 
 local function playTitleParticleBurst(player, tierColor)
@@ -375,15 +409,61 @@ GiveReputationEvent.OnServerEvent:Connect(function(voter, targetUserId, action)
 		return
 	end
 
+	-- REP SHIELD: silently block thumbsDown for the first 30 minutes of a new player's life
+	if action == "thumbsDown" then
+		local shieldData = getCachedOrDefault(targetUserId)
+		local firstJoin = shieldData.firstJoinTime or 0
+		if firstJoin > 0 and (os.time() - firstJoin) < 1800 then
+			fireVoteResult(voter, { ok = false }) -- silent: no reason shown
+			return
+		end
+	end
+
 	local voterData = getCachedOrDefault(voter.UserId)
 	local targetData = getCachedOrDefault(targetUserId)
 	pruneCooldowns(voterData)
 
+	-- REP BOOST: double positive rep if target owns the RepBoost gamepass
+	if delta > 0 and targetPlayer:GetAttribute("OwnsRepBoost") then
+		delta = delta * 2
+	end
+
 	local beforeTier = getTierIndex(targetData.score)
 	targetData.score += delta
 	targetData.totalReceived += 1
+	local isFirstRepGiven = voterData.totalGiven == 0
 	voterData.totalGiven += 1
 	voterData.cooldownByTarget[tostring(targetUserId)] = os.time() + COOLDOWN_SECONDS
+
+	-- BADGE: first rep given
+	if isFirstRepGiven and _G.OnFirstRepGiven then
+		task.spawn(_G.OnFirstRepGiven, voter)
+	end
+
+	-- BADGE: Shady tier reached
+	if targetData.score <= -10 and (targetData.score - delta) > -10 then
+		local targetPlayer = Players:GetPlayerByUserId(targetUserId)
+		if targetPlayer and _G.OnShadyTierReached then
+			task.spawn(_G.OnShadyTierReached, targetPlayer)
+		end
+	end
+
+	-- BADGE: Generous Soul — track unique targets who received positive rep
+	if action == "thumbsUp" or action == "love" then
+		local gt = voterData.generousTargets
+		local targetKey = tostring(targetUserId)
+		if not gt[targetKey] then
+			local count = 0
+			for _ in pairs(gt) do count += 1 end
+			if count < 10 then
+				gt[targetKey] = true
+				count += 1
+				if count >= 10 and _G.OnGenerousSoul then
+					task.spawn(_G.OnGenerousSoul, voter)
+				end
+			end
+		end
+	end
 
 	local afterTier = getTierIndex(targetData.score)
 	local titleUpgraded = afterTier > beforeTier
@@ -416,7 +496,7 @@ GiveReputationEvent.OnServerEvent:Connect(function(voter, targetUserId, action)
 		dlog("firing reaction aura", action, "for", targetUserId)
 		_G.FireRepReactionForNametag(targetUserId, action)
 	else
-		warn("[ReputationServer] _G.FireRepReactionForNametag not ready — reaction skipped")
+		warn("[ReputationServer] _G.FireRepReactionForNametag not ready � reaction skipped")
 	end
 
 	task.spawn(function()
@@ -521,10 +601,10 @@ AdminRepCanUse.OnServerInvoke = function(requester)
 	return requester and ADMIN_IDS[requester.UserId] == true or false
 end
 
--- ── HANDLER ──────────────────────────────────────────────────────────────────
+-- -- HANDLER ------------------------------------------------------------------
 AdminRepEvent.OnServerEvent:Connect(function(admin, payload)
 
-	-- Hard security check — reject anyone not in the list
+	-- Hard security check � reject anyone not in the list
 	if not ADMIN_IDS[admin.UserId] then
 		warn("[AdminRep] Unauthorized request from " .. admin.Name .. " (" .. admin.UserId .. ")")
 		AdminRepResponse:FireClient(admin, { ok = false, msg = "Admin only" })
@@ -621,10 +701,117 @@ AdminRepEvent.OnServerEvent:Connect(function(admin, payload)
 	local newTitle = buildRepPayload(targetUserId, data).title
 	AdminRepResponse:FireClient(admin, {
 		ok  = true,
-		msg = targetPlayer.DisplayName .. ": " .. oldScore .. " → " .. newScore .. "  (" .. newTitle .. ")",
+		msg = targetPlayer.DisplayName .. ": " .. oldScore .. " ? " .. newScore .. "  (" .. newTitle .. ")",
 	})
 
-	print("[AdminRep] " .. admin.Name .. " set " .. targetPlayer.Name .. " rep: " .. oldScore .. " → " .. newScore)
+	print("[AdminRep] " .. admin.Name .. " set " .. targetPlayer.Name .. " rep: " .. oldScore .. " ? " .. newScore)
 end)
 
+--[[
+    ReputationServer PATCH v2  (FIXED)
+    ==================================
+    REPLACE your previous patch block at the bottom of ReputationServer.lua
+    with this one entirely.
+
+    Fixes:
+      - Shady tier now correctly matches scores below 0
+      - Adds _G.SubscribeToRepUpdates so LeaderStats updates live
+      - Keeps GetRepDataForLeaderboard and GetChatTag working
+]]
+
+-- -- Expose rep cache for LeaderStats ----------------------------------------
+_G.GetRepDataForLeaderboard = function(userId)
+	return repCache[userId]
+end
+
+-- -- Live update subscriptions for LeaderStats -------------------------------
+local repSubscribers = {} -- [userId] = { callback, ... }
+
+_G.SubscribeToRepUpdates = function(userId, callback)
+	if not repSubscribers[userId] then
+		repSubscribers[userId] = {}
+	end
+	table.insert(repSubscribers[userId], callback)
+end
+
+-- Fill forward declaration from top of file
+fireRepSubscribers = function(userId, score)
+	local subs = repSubscribers[userId]
+	if not subs then return end
+	for _, cb in ipairs(subs) do
+		task.spawn(cb, score)
+	end
+end
+
+-- -- GetChatTag remote --------------------------------------------------------
+local GetChatTag = Remotes:FindFirstChild("GetChatTag")
+if not GetChatTag then
+	GetChatTag = Instance.new("RemoteFunction")
+	GetChatTag.Name = "GetChatTag"
+	GetChatTag.Parent = Remotes
+end
+
+-- FIXED: use -math.huge as the floor so Shady always matches negative scores
+local CHAT_TIERS = {
+	{ min = -math.huge, title = "Shady",       color = { 220, 90,  105 } },
+	{ min = 0,          title = "Visitor",     color = { 170, 155, 210 } },
+	{ min = 25,         title = "Rising",      color = { 120, 190, 255 } },
+	{ min = 100,        title = "Famous",      color = { 255, 210, 120 } },
+	{ min = 250,        title = "Trendsetter", color = { 215, 170, 255 } },
+	{ min = 500,        title = "Influencer",  color = { 255, 160, 235 } },
+	{ min = 1000,       title = "Celebrity",   color = { 255, 225, 90  } },
+}
+
+local function getChatTierInfo(score)
+	local info = CHAT_TIERS[1]
+	for _, tier in ipairs(CHAT_TIERS) do
+		if score >= tier.min then
+			info = tier
+		end
+	end
+	return info
+end
+
+GetChatTag.OnServerInvoke = function(_, targetUserId)
+	if type(targetUserId) ~= "number" then return nil end
+
+	-- VIP overrides tier tag: show [VIP] in gold
+	local targetPlayer = Players:GetPlayerByUserId(targetUserId)
+	if targetPlayer and targetPlayer:GetAttribute("OwnsVIP") then
+		return { title = "VIP", hex = "#FFD700", isVip = true }
+	end
+
+	local data = repCache[targetUserId] or { score = 0 }
+	local score = data.score or 0
+	local tier = getChatTierInfo(score)
+	local hex = string.format("#%02X%02X%02X",
+		tier.color[1], tier.color[2], tier.color[3]
+	)
+	return { title = tier.title, hex = hex }
+end
+
 print("[AdminRep] Admin reputation commands active.")
+
+-- -- Exposed for GamepassServer: grant bonus rep without a voter cooldown -------
+_G.GrantBonusRep = function(userId, amount)
+	local player = Players:GetPlayerByUserId(userId)
+	if not player then return end
+	local data = getCachedOrDefault(userId)
+	local beforeTier = getTierIndex(data.score)
+	data.score = math.clamp(data.score + amount, -9999, 99999)
+	local afterTier = getTierIndex(data.score)
+	local upgraded = afterTier > beforeTier
+	pushRepUpdate(userId, data, upgraded)
+	if upgraded then
+		local burstPayload = buildRepPayload(userId, data)
+		playTitleParticleBurst(player, burstPayload.tierColor)
+	end
+	markRepDirty(userId)
+	dlog("GrantBonusRep:", userId, "+", amount, "-> new score:", data.score)
+end
+
+-- Badge callbacks (registered by BadgeServer)
+_G.OnFirstJoin = nil
+_G.OnFirstRepGiven = nil
+_G.OnGenerousSoul = nil
+_G.OnShadyTierReached = nil
