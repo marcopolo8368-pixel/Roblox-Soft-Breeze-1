@@ -11,11 +11,17 @@
     animated mood badges, and cleaner typography.
 ]]
 
+print("[ProfileCardGui] Script starting...")
+
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+
+-- Wait for config to be ready (published by ProfileCardConfig.luau)
+while not _G._ProfileCardConfig do task.wait(0.05) end
+local Config = _G._ProfileCardConfig
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -28,7 +34,9 @@ local GiveReputationEvent = Remotes:WaitForChild("GiveReputation")
 local RequestReputationFunc = Remotes:WaitForChild("RequestReputation")
 local ReputationUpdatedEvent = Remotes:WaitForChild("ReputationUpdated")
 local RequestRepCooldownFunc = Remotes:WaitForChild("RequestRepCooldown")
-local AdminRepCanUseFunc = Remotes:FindFirstChild("AdminRepCanUse")
+local AdminRepCanUseFunc  = Remotes:FindFirstChild("AdminRepCanUse")
+local CheckPassOwnershipFunc = Remotes:WaitForChild("CheckPassOwnership")
+local SetCustomTitleEvent = Remotes:WaitForChild("SetCustomTitle")
 local RepSounds = ReplicatedStorage:WaitForChild("RepSounds")
 
 local isAuthorizedAdmin = false
@@ -42,111 +50,37 @@ if AdminRepCanUseFunc and AdminRepCanUseFunc:IsA("RemoteFunction") then
 end
 
 _G.IsAuthorizedAdmin = isAuthorizedAdmin
-
-local actionToSound = {
-	thumbsUp = "ThumbsUp",
-	thumbsDown = "ThumbsDown",
-	love = "Love",
-}
-
-local function playRepSound(soundName, volume)
-	local sound = RepSounds:FindFirstChild(soundName)
-	if sound and sound:IsA("Sound") then
-		sound.Volume = volume or 0.6
-		sound:Play()
-	end
-end
-
-local function getSoundNameFromPayload(payload)
-	if not payload then return nil end
-	if type(payload.action) == "string" then
-		return actionToSound[payload.action]
-	end
-	if payload.delta == 2 then return "Love" end
-	if payload.delta == 1 then return "ThumbsUp" end
-	if payload.delta == -1 then return "ThumbsDown" end
-	return nil
-end
+print("[ProfileCardGui] Phase 1 OK - remotes loaded, admin:", isAuthorizedAdmin)
 
 -- -------------------------------------------
--- CONFIGURATION
+-- CONFIGURATION (from Config module)
 -- -------------------------------------------
-local TOGGLE_KEY = Enum.KeyCode.P
-local DOUBLE_CLICK_TIME = 0.35
-
--- --- RESPONSIVE HELPERS ---
-local IS_SMALL_SCREEN, IS_MEDIUM_SCREEN
-do
-	local cam = workspace.CurrentCamera
-	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-	IS_SMALL_SCREEN = vp.X < 700 or vp.Y < 500
-	IS_MEDIUM_SCREEN = not IS_SMALL_SCREEN and (vp.X < 1100 or vp.Y < 700)
-end
-
-local COLORS = {
-	bg = Color3.fromRGB(8, 8, 16),
-	panel = Color3.fromRGB(14, 14, 24),
-	input = Color3.fromRGB(24, 24, 42),
-	inputFocus = Color3.fromRGB(32, 32, 55),
-	accent = Color3.fromRGB(138, 100, 214),
-	accentLight = Color3.fromRGB(180, 140, 255),
-	accentDark = Color3.fromRGB(90, 60, 160),
-	text = Color3.fromRGB(230, 230, 245),
-	textDim = Color3.fromRGB(100, 100, 135),
-	textMuted = Color3.fromRGB(70, 70, 95),
-	success = Color3.fromRGB(80, 200, 120),
-	cardBg1 = Color3.fromRGB(16, 16, 30),
-	cardBg2 = Color3.fromRGB(30, 22, 50),
-}
-
-local EMOJI = {
-	thumbsUp = utf8.char(0x1F44D),
-	thumbsDown = utf8.char(0x1F44E),
-	love = utf8.char(0x2764, 0xFE0F),
-	studio = utf8.char(0x1F3AE),
-	chill = utf8.char(0x1F60C),
-	happy = utf8.char(0x1F604),
-	vibing = utf8.char(0x1F3B5),
-	sad = utf8.char(0x1F614),
-	tired = utf8.char(0x1F634),
-	energetic = utf8.char(0x26A1),
-	creative = utf8.char(0x1F3A8),
-	thoughtful = utf8.char(0x1F914),
-}
-
-local MOODS = { "Chill", "Happy", "Vibing", "Sad", "Tired", "Energetic", "Creative", "Thoughtful" }
-local MOOD_SYMBOLS = {
-	Chill = EMOJI.chill, Happy = EMOJI.happy, Vibing = EMOJI.vibing, Sad = EMOJI.sad,
-	Tired = EMOJI.tired, Energetic = EMOJI.energetic, Creative = EMOJI.creative, Thoughtful = EMOJI.thoughtful,
-}
-
--- -------------------------------------------
--- HELPERS
--- -------------------------------------------
-local function tween(instance, props, duration)
-	TweenService:Create(instance, TweenInfo.new(duration or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
-end
-
-local function colorToTable(c3)
-	return { math.floor(c3.R * 255), math.floor(c3.G * 255), math.floor(c3.B * 255) }
-end
-
-local function tableToColor(t)
-	if type(t) == "table" and #t >= 3 then
-		return Color3.fromRGB(t[1] or 138, t[2] or 100, t[3] or 214)
-	end
-	return Color3.fromRGB(138, 100, 214)
-end
+local COLORS = Config.COLORS
+local EMOJI = Config.EMOJI
+local MOODS = Config.MOODS
+local MOOD_SYMBOLS = Config.MOOD_SYMBOLS
+local CARD_STYLES = Config.CARD_STYLES
+local TITLE_OPTIONS = Config.TITLE_OPTIONS
+local IS_SMALL_SCREEN = Config.IS_SMALL_SCREEN
+local IS_MEDIUM_SCREEN = Config.IS_MEDIUM_SCREEN
+local TOGGLE_KEY = Config.TOGGLE_KEY
+local DOUBLE_CLICK_TIME = Config.DOUBLE_CLICK_TIME
+local tween = Config.tween
+local colorToTable = Config.colorToTable
+local tableToColor = Config.tableToColor
+local colorsMatch = Config.colorsMatch
 
 -- -------------------------------------------
 -- SCREEN GUI
 -- -------------------------------------------
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ProfileCardGui"
-screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.DisplayOrder = 15
-screenGui.Parent = playerGui
+screenGui.Name                  = "ProfileCardGui"
+screenGui.ResetOnSpawn          = false
+screenGui.ZIndexBehavior        = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder          = 15
+screenGui.SafeAreaCompatibility = Enum.SafeAreaCompatibility.FullscreenExtension
+screenGui.Parent                = playerGui
+print("[ProfileCardGui] Phase 2 OK - ScreenGui created")
 
 -- -------------------------------------------
 -- PROFILE CARD DISPLAY COMPONENT
@@ -368,29 +302,72 @@ local function updateCardDisplay(card, data, userId)
 	local avatarOuter = card:FindFirstChild("AvatarOuter")
 	if avatarOuter then
 		local glow = avatarOuter:FindFirstChild("AvatarGlow")
-		if glow then glow.Color = favColor end
+		if glow then glow.Color = tableToColor(data.bgGradientStart) end
 	end
 
 	-- Accent bar color matches fav color
 	local accentBar = card:FindFirstChild("AccentBar")
 	if accentBar then accentBar.BackgroundColor3 = favColor end
 
-	-- Card stroke color
+	local gradStart = tableToColor(data.bgGradientStart)
+	local gradEnd = tableToColor(data.bgGradientEnd)
+
+	-- Card stroke color uses the style/theme gradient colors for cursor glow
 	local cardStroke = card:FindFirstChild("CardStroke")
 	if cardStroke then
 		local sg = cardStroke:FindFirstChildOfClass("UIGradient")
 		if sg then
 			sg.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, favColor),
-				ColorSequenceKeypoint.new(0.5, COLORS.accentLight),
-				ColorSequenceKeypoint.new(1, favColor),
+				ColorSequenceKeypoint.new(0,   gradEnd),
+				ColorSequenceKeypoint.new(0.5, gradStart),
+				ColorSequenceKeypoint.new(1,   gradEnd),
 			})
 		end
 	end
+	-- BgGradient uses the style colors as the card's base gradient
+	local bgGrad = card:FindFirstChild("BgGradient")
+	if bgGrad then bgGrad.Color = ColorSequence.new(gradStart, gradEnd) end
 
-	local gradStart = tableToColor(data.bgGradientStart)
-	local gradEnd = tableToColor(data.bgGradientEnd)
-	card:FindFirstChild("BgGradient").Color = ColorSequence.new(gradStart, gradEnd)
+	-- StyleOverlay is a hidden compat element — just store colors for reference
+	local styleOverlay = card:FindFirstChild("StyleOverlay")
+	if styleOverlay then
+		local styleGrad = styleOverlay:FindFirstChildOfClass("UIGradient")
+		if styleGrad then
+			styleGrad.Color = ColorSequence.new(gradStart, gradEnd)
+		end
+	end
+
+	-- Update outer avatar ring gradient to match theme
+	local avatarRing = card:FindFirstChild("AvatarRing")
+	if avatarRing then
+		local ringStroke = avatarRing:FindFirstChildOfClass("UIStroke")
+		if ringStroke then
+			local ringGrad = ringStroke:FindFirstChildOfClass("UIGradient")
+			if ringGrad then
+				ringGrad.Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0,   gradStart),
+					ColorSequenceKeypoint.new(0.5, gradEnd),
+					ColorSequenceKeypoint.new(1,   gradStart),
+				})
+			end
+		end
+	end
+
+	-- Background image (theme)
+	local bgImage = card:FindFirstChild("BgImage")
+	if bgImage then
+		if data.bgImageId and data.bgImageId ~= "" then
+			local imgId = data.bgImageId
+			if not string.find(imgId, "://") then
+				imgId = "rbxassetid://" .. imgId
+			end
+			bgImage.Image = imgId
+			bgImage.ImageTransparency = 0
+		else
+			bgImage.Image = ""
+			bgImage.ImageTransparency = 1
+		end
+	end
 
 	-- Avatar thumbnail
 	if userId then
@@ -412,8 +389,8 @@ end
 -- -------------------------------------------
 -- EDITOR PANEL
 -- -------------------------------------------
-local EDITOR_SIZE_OPEN = IS_SMALL_SCREEN and UDim2.new(0.96, 0, 0.9, 0) or UDim2.new(0, 580, 0, 400)
-local EDITOR_SIZE_CLOSED = IS_SMALL_SCREEN and UDim2.new(0.96, 0, 0, 10) or UDim2.new(0, 580, 0, 10)
+local EDITOR_SIZE_OPEN = IS_SMALL_SCREEN and UDim2.new(0.96, 0, 0.9, 0) or UDim2.new(0, 500, 0, 580)
+local EDITOR_SIZE_CLOSED = IS_SMALL_SCREEN and UDim2.new(0.96, 0, 0, 10) or UDim2.new(0, 500, 0, 10)
 
 local editorFrame = Instance.new("Frame")
 editorFrame.Name = "EditorPanel"
@@ -426,32 +403,36 @@ editorFrame.ClipsDescendants = true
 editorFrame.Visible = false
 editorFrame.Parent = screenGui
 
-local editorCorner = Instance.new("UICorner")
-editorCorner.CornerRadius = UDim.new(0, 18)
-editorCorner.Parent = editorFrame
+do
+	local editorCorner = Instance.new("UICorner")
+	editorCorner.CornerRadius = UDim.new(0, 18)
+	editorCorner.Parent = editorFrame
 
-local editorStroke = Instance.new("UIStroke")
-editorStroke.Color = Color3.fromRGB(255, 255, 255)
-editorStroke.Transparency = 0.88
-editorStroke.Thickness = 1
-editorStroke.Parent = editorFrame
+	local editorStroke = Instance.new("UIStroke")
+	editorStroke.Color = Color3.fromRGB(255, 255, 255)
+	editorStroke.Transparency = 0.88
+	editorStroke.Thickness = 1
+	editorStroke.Parent = editorFrame
 
-local editorGrad = Instance.new("UIGradient")
-editorGrad.Rotation = 135
-editorGrad.Color = ColorSequence.new(Color3.fromRGB(8, 8, 16), Color3.fromRGB(16, 12, 26))
-editorGrad.Parent = editorFrame
+	local editorGrad = Instance.new("UIGradient")
+	editorGrad.Rotation = 135
+	editorGrad.Color = ColorSequence.new(Color3.fromRGB(8, 8, 16), Color3.fromRGB(16, 12, 26))
+	editorGrad.Parent = editorFrame
+end
 
 -- Editor header
-local editorTitle = Instance.new("TextLabel")
-editorTitle.Size = UDim2.new(0, 200, 0, 24)
-editorTitle.Position = UDim2.new(0, 24, 0, 18)
-editorTitle.BackgroundTransparency = 1
-editorTitle.Text = "EDIT YOUR CARD"
-editorTitle.TextColor3 = COLORS.text
-editorTitle.TextSize = 15
-editorTitle.Font = Enum.Font.GothamBold
-editorTitle.TextXAlignment = Enum.TextXAlignment.Left
-editorTitle.Parent = editorFrame
+do
+	local editorTitle = Instance.new("TextLabel")
+	editorTitle.Size = UDim2.new(0, 200, 0, 24)
+	editorTitle.Position = UDim2.new(0, 24, 0, 18)
+	editorTitle.BackgroundTransparency = 1
+	editorTitle.Text = "EDIT YOUR CARD"
+	editorTitle.TextColor3 = COLORS.text
+	editorTitle.TextSize = 15
+	editorTitle.Font = Enum.Font.GothamBold
+	editorTitle.TextXAlignment = Enum.TextXAlignment.Left
+	editorTitle.Parent = editorFrame
+end
 
 -- Close button (drawn X icon)
 local closeBtn = Instance.new("TextButton")
@@ -463,83 +444,168 @@ closeBtn.BackgroundColor3 = COLORS.input
 closeBtn.Text = ""
 closeBtn.Parent = editorFrame
 
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0, 8)
-closeCorner.Parent = closeBtn
+-- Eye button — view your own profile card
+local eyeBtn = Instance.new("TextButton")
+eyeBtn.Name             = "EyeBtn"
+eyeBtn.Size             = IS_SMALL_SCREEN and UDim2.new(0, 44, 0, 44) or UDim2.new(0, 32, 0, 32)
+eyeBtn.Position         = UDim2.new(1, IS_SMALL_SCREEN and -68 or -56, 0, 14)
+eyeBtn.AnchorPoint      = Vector2.new(1, 0)
+eyeBtn.BackgroundColor3 = COLORS.input
+eyeBtn.Text             = "👁"
+eyeBtn.TextSize         = IS_SMALL_SCREEN and 20 or 16
+eyeBtn.Font             = Enum.Font.GothamBold
+eyeBtn.TextColor3       = COLORS.textDim
+eyeBtn.BorderSizePixel  = 0
+eyeBtn.ZIndex           = 5
+eyeBtn.Parent           = editorFrame
+Instance.new("UICorner", eyeBtn).CornerRadius = UDim.new(0, 8)
 
--- Draw X from two rotated lines
-local xLine1 = Instance.new("Frame")
-xLine1.Size = UDim2.new(0, 14, 0, 2)
-xLine1.Position = UDim2.new(0.5, 0, 0.5, 0)
-xLine1.AnchorPoint = Vector2.new(0.5, 0.5)
-xLine1.BackgroundColor3 = COLORS.textDim
-xLine1.Rotation = 45
-xLine1.BorderSizePixel = 0
-xLine1.Parent = closeBtn
+eyeBtn.MouseEnter:Connect(function()
+	TweenService:Create(eyeBtn, TweenInfo.new(0.12), { BackgroundColor3 = COLORS.inputFocus, TextColor3 = COLORS.accent }):Play()
+end)
+eyeBtn.MouseLeave:Connect(function()
+	TweenService:Create(eyeBtn, TweenInfo.new(0.12), { BackgroundColor3 = COLORS.input, TextColor3 = COLORS.textDim }):Play()
+end)
 
-local xLine2 = Instance.new("Frame")
-xLine2.Size = UDim2.new(0, 14, 0, 2)
-xLine2.Position = UDim2.new(0.5, 0, 0.5, 0)
-xLine2.AnchorPoint = Vector2.new(0.5, 0.5)
-xLine2.BackgroundColor3 = COLORS.textDim
-xLine2.Rotation = -45
-xLine2.BorderSizePixel = 0
-xLine2.Parent = closeBtn
+do
+	local closeCorner = Instance.new("UICorner")
+	closeCorner.CornerRadius = UDim.new(0, 8)
+	closeCorner.Parent = closeBtn
 
--- Content parent (ScrollingFrame on mobile, editorFrame on desktop)
-local editorContentParent = editorFrame
-if IS_SMALL_SCREEN then
-	local editorScroll = Instance.new("ScrollingFrame")
-	editorScroll.Name = "EditorScroll"
-	editorScroll.Size = UDim2.new(1, 0, 1, -100)
-	editorScroll.Position = UDim2.new(0, 0, 0, 50)
-	editorScroll.BackgroundTransparency = 1
-	editorScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	editorScroll.ScrollBarThickness = 3
-	editorScroll.ScrollBarImageColor3 = COLORS.accent
-	editorScroll.BorderSizePixel = 0
-	editorScroll.ClipsDescendants = true
-	editorScroll.Parent = editorFrame
-	local scrollPad = Instance.new("UIPadding")
-	scrollPad.PaddingBottom = UDim.new(0, 20)
-	scrollPad.Parent = editorScroll
-	editorContentParent = editorScroll
+	-- Draw X from two rotated lines
+	local xLine1 = Instance.new("Frame")
+	xLine1.Size = UDim2.new(0, 14, 0, 2)
+	xLine1.Position = UDim2.new(0.5, 0, 0.5, 0)
+	xLine1.AnchorPoint = Vector2.new(0.5, 0.5)
+	xLine1.BackgroundColor3 = COLORS.textDim
+	xLine1.Rotation = 45
+	xLine1.BorderSizePixel = 0
+	xLine1.Parent = closeBtn
+
+	local xLine2 = Instance.new("Frame")
+	xLine2.Size = UDim2.new(0, 14, 0, 2)
+	xLine2.Position = UDim2.new(0.5, 0, 0.5, 0)
+	xLine2.AnchorPoint = Vector2.new(0.5, 0.5)
+	xLine2.BackgroundColor3 = COLORS.textDim
+	xLine2.Rotation = -45
+	xLine2.BorderSizePixel = 0
+	xLine2.Parent = closeBtn
 end
 
--- Form fields & card preview
-local formFrame = Instance.new("Frame")
-formFrame.Name = "FormFields"
-formFrame.BackgroundTransparency = 1
+-- Always use a ScrollingFrame so editor is fully scrollable on all screen sizes
+local editorScroll = Instance.new("ScrollingFrame")
+editorScroll.Name                = "EditorScroll"
+editorScroll.Size                = UDim2.new(1, 0, 1, -60)
+editorScroll.Position            = UDim2.new(0, 0, 0, 60)
+editorScroll.BackgroundTransparency = 1
+editorScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
+editorScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+editorScroll.ScrollBarThickness  = 3
+editorScroll.ScrollBarImageColor3 = COLORS.accent
+editorScroll.BorderSizePixel     = 0
+editorScroll.ClipsDescendants    = true
+editorScroll.Parent              = editorFrame
 
-local previewCard
-if IS_SMALL_SCREEN then
-	-- Mobile: NO preview card � form takes the full editor space
-	formFrame.Size = UDim2.new(1, -24, 0, 600)
-	formFrame.Position = UDim2.new(0, 12, 0, 8)
-	formFrame.Parent = editorContentParent
-	-- create an invisible dummy card so updatePreview() doesn't error
-	previewCard = Instance.new("Frame")
-	previewCard.Name = "ProfileCard"
-	previewCard.Visible = false
-	previewCard.Parent = editorContentParent
-	-- add dummy children updateCardDisplay looks for
-	local function dummy(name)
+do
+	local _edScrollPad = Instance.new("UIPadding")
+	_edScrollPad.PaddingBottom = UDim.new(0, 60)  -- room for Save button
+	_edScrollPad.Parent        = editorScroll
+end
+
+local editorContentParent = editorScroll
+
+-- Form fields — full-width, no side preview card
+local formFrame = Instance.new("Frame")
+formFrame.Name                = "FormFields"
+formFrame.BackgroundTransparency = 1
+formFrame.Size                = UDim2.new(1, -24, 0, 900)  -- tall enough for all fields + pass section
+formFrame.Position            = UDim2.new(0, 12, 0, 8)
+formFrame.Parent              = editorContentParent
+
+-- Hidden dummy card so updatePreview() never errors (not visible to user)
+local previewCard = Instance.new("Frame")
+previewCard.Name    = "ProfileCard"
+previewCard.Visible = false
+previewCard.Size    = UDim2.fromOffset(0, 0)
+previewCard.BackgroundTransparency = 1
+previewCard.Parent  = editorFrame
+
+-- Properly-typed dummy children that updateCardDisplay expects
+do
+	local _dummyBg = Instance.new("UIGradient")
+	_dummyBg.Name   = "BgGradient"
+	_dummyBg.Parent = previewCard
+
+	local _dummyStrokeFrame = Instance.new("Frame")
+	_dummyStrokeFrame.Name               = "CardStroke"
+	_dummyStrokeFrame.BackgroundTransparency = 1
+	_dummyStrokeFrame.Size               = UDim2.fromOffset(0, 0)
+	_dummyStrokeFrame.Parent             = previewCard
+	local _dummySG = Instance.new("UIGradient")
+	_dummySG.Parent = _dummyStrokeFrame
+
+	local function _dummyLabel(name)
 		local f = Instance.new("TextLabel")
-		f.Name = name; f.Visible = false; f.Parent = previewCard
+		f.Name = name; f.Visible = false; f.BackgroundTransparency = 1
+		f.Size = UDim2.fromOffset(0, 0); f.Parent = previewCard
 	end
-	dummy("DisplayName"); dummy("Bio"); dummy("MoodBadge")
-	local mb = previewCard:FindFirstChild("MoodBadge") or Instance.new("Frame")
-	mb.Name = "MoodBadge"; mb.Visible = false; mb.Parent = previewCard
-	local mt = Instance.new("TextLabel")
-	mt.Name = "MoodText"; mt.Visible = false; mt.Parent = mb
-	dummy("FavColorDot"); dummy("AvatarOuter"); dummy("AccentBar")
-	dummy("CardStroke"); dummy("BgGradient"); dummy("Quote")
-else
-	-- Desktop: side-by-side layout (unchanged)
-	formFrame.Size = UDim2.new(0, 300, 0, 320)
-	formFrame.Position = UDim2.new(0, 24, 0, 56)
-	formFrame.Parent = editorFrame
-	previewCard = createCardDisplay(editorFrame, UDim2.new(0, 210, 0, 300), UDim2.new(1, -135, 0.5, 14))
+	_dummyLabel("DisplayName"); _dummyLabel("Bio"); _dummyLabel("Quote")
+
+	local _dummyMoodBadge = Instance.new("Frame")
+	_dummyMoodBadge.Name = "MoodBadge"; _dummyMoodBadge.Visible = false
+	_dummyMoodBadge.Size = UDim2.fromOffset(0, 0); _dummyMoodBadge.BackgroundTransparency = 1
+	_dummyMoodBadge.Parent = previewCard
+	local _dummyMoodText = Instance.new("TextLabel")
+	_dummyMoodText.Name = "MoodText"; _dummyMoodText.Visible = false
+	_dummyMoodText.BackgroundTransparency = 1; _dummyMoodText.Size = UDim2.fromOffset(0, 0)
+	_dummyMoodText.Parent = _dummyMoodBadge
+
+	local _dummyDot = Instance.new("Frame")
+	_dummyDot.Name = "FavColorDot"; _dummyDot.Visible = false
+	_dummyDot.Size = UDim2.fromOffset(0, 0); _dummyDot.BackgroundTransparency = 1
+	_dummyDot.Parent = previewCard
+
+	local _dummyAvatarOuter = Instance.new("Frame")
+	_dummyAvatarOuter.Name = "AvatarOuter"; _dummyAvatarOuter.Visible = false
+	_dummyAvatarOuter.Size = UDim2.fromOffset(0, 0); _dummyAvatarOuter.BackgroundTransparency = 1
+	_dummyAvatarOuter.Parent = previewCard
+	local _dummyAvatar = Instance.new("ImageLabel")
+	_dummyAvatar.Name = "Avatar"; _dummyAvatar.Visible = false
+	_dummyAvatar.Size = UDim2.fromOffset(0, 0); _dummyAvatar.BackgroundTransparency = 1
+	_dummyAvatar.Parent = _dummyAvatarOuter
+
+	local _dummyAccentBar = Instance.new("Frame")
+	_dummyAccentBar.Name = "AccentBar"; _dummyAccentBar.Visible = false
+	_dummyAccentBar.Size = UDim2.fromOffset(0, 0); _dummyAccentBar.BackgroundTransparency = 1
+	_dummyAccentBar.Parent = previewCard
+
+	local _dummyStyleOverlay = Instance.new("Frame")
+	_dummyStyleOverlay.Name = "StyleOverlay"
+	_dummyStyleOverlay.Visible = false
+	_dummyStyleOverlay.Size = UDim2.fromOffset(0, 0)
+	_dummyStyleOverlay.BackgroundTransparency = 1
+	_dummyStyleOverlay.Parent = previewCard
+	local _dummyStyleGrad = Instance.new("UIGradient")
+	_dummyStyleGrad.Name = "StyleGradient"
+	_dummyStyleGrad.Parent = _dummyStyleOverlay
+
+	local _dummyBgImage = Instance.new("ImageLabel")
+	_dummyBgImage.Name = "BgImage"
+	_dummyBgImage.Visible = false
+	_dummyBgImage.Size = UDim2.fromOffset(0, 0)
+	_dummyBgImage.BackgroundTransparency = 1
+	_dummyBgImage.Parent = previewCard
+
+	local _dummyAvatarRing = Instance.new("Frame")
+	_dummyAvatarRing.Name = "AvatarRing"
+	_dummyAvatarRing.Visible = false
+	_dummyAvatarRing.Size = UDim2.fromOffset(0, 0)
+	_dummyAvatarRing.BackgroundTransparency = 1
+	_dummyAvatarRing.Parent = previewCard
+	local _dummyRingStroke = Instance.new("UIStroke")
+	_dummyRingStroke.Parent = _dummyAvatarRing
+	local _dummyRingGrad = Instance.new("UIGradient")
+	_dummyRingGrad.Parent = _dummyRingStroke
 end
 
 -- -------------------------------------------
@@ -625,108 +691,571 @@ end
 -- -------------------------------------------
 -- CREATE FORM FIELDS
 -- -------------------------------------------
-createFormField("Display Name", "displayName", "Your name...", 30)
 createFormField("Bio", "bio", "Tell us about yourself...", 100, true)
-if not IS_SMALL_SCREEN then
-	createFormField("Favorite Quote", "quote", "Your favorite quote...", 60)
-end
+createFormField("Favorite Quote", "quote", "Your favorite quote...", 60)
 
 -- Mood selector
-local moodLbl = Instance.new("TextLabel")
-moodLbl.Size = UDim2.new(1, 0, 0, 14)
-moodLbl.Position = UDim2.new(0, 0, 0, yOffset)
-moodLbl.BackgroundTransparency = 1
-moodLbl.Text = "MOOD"
-moodLbl.TextColor3 = COLORS.textMuted
-moodLbl.TextSize = 10
-moodLbl.Font = Enum.Font.GothamBold
-moodLbl.TextXAlignment = Enum.TextXAlignment.Left
-moodLbl.Parent = formFrame
-yOffset += 18
-
-local moodContainer = Instance.new("Frame")
-local moodColumns = IS_SMALL_SCREEN and 2 or 4
-local moodRows = math.ceil(#MOODS / moodColumns)
-local moodCellHeight = IS_SMALL_SCREEN and 34 or 26
-local moodGapX = IS_SMALL_SCREEN and 8 or 5
-local moodGapY = IS_SMALL_SCREEN and 8 or 4
-local moodContainerHeight = (moodRows * moodCellHeight) + ((moodRows - 1) * moodGapY)
-
-moodContainer.Size = UDim2.new(1, 0, 0, moodContainerHeight)
-moodContainer.Position = UDim2.new(0, 0, 0, yOffset)
-moodContainer.BackgroundTransparency = 1
-moodContainer.Parent = formFrame
-
-local moodGrid = Instance.new("UIGridLayout")
-moodGrid.CellPadding = UDim2.new(0, moodGapX, 0, moodGapY)
-if IS_SMALL_SCREEN then
-	moodGrid.CellSize = UDim2.new(0.5, -(moodGapX / 2), 0, moodCellHeight)
-else
-	moodGrid.CellSize = UDim2.new(0, 70, 0, moodCellHeight)
-end
-moodGrid.FillDirectionMaxCells = moodColumns
-moodGrid.HorizontalAlignment = Enum.HorizontalAlignment.Left
-moodGrid.SortOrder = Enum.SortOrder.LayoutOrder
-moodGrid.Parent = moodContainer
-
 local moodButtons = {}
 local selectedMood = "Chill"
+do
+	local moodLbl = Instance.new("TextLabel")
+	moodLbl.Size = UDim2.new(1, 0, 0, 14)
+	moodLbl.Position = UDim2.new(0, 0, 0, yOffset)
+	moodLbl.BackgroundTransparency = 1
+	moodLbl.Text = "MOOD"
+	moodLbl.TextColor3 = COLORS.textMuted
+	moodLbl.TextSize = 10
+	moodLbl.Font = Enum.Font.GothamBold
+	moodLbl.TextXAlignment = Enum.TextXAlignment.Left
+	moodLbl.Parent = formFrame
+	yOffset += 18
 
-for i, mood in ipairs(MOODS) do
-	local moodBtn = Instance.new("TextButton")
-	moodBtn.Name = mood
-	moodBtn.Size = UDim2.new(0, 70, 0, moodCellHeight)
-	moodBtn.LayoutOrder = i
-	moodBtn.BackgroundColor3 = COLORS.input
-	moodBtn.Text = (MOOD_SYMBOLS[mood] or "") .. " " .. mood
-	moodBtn.TextSize = IS_SMALL_SCREEN and 12 or 10
-	moodBtn.TextColor3 = COLORS.text
-	moodBtn.Font = Enum.Font.GothamBold
-	moodBtn.Parent = moodContainer
+	local moodContainer = Instance.new("Frame")
+	local moodColumns = IS_SMALL_SCREEN and 2 or 3
+	local moodCellHeight = IS_SMALL_SCREEN and 34 or 30
+	local moodGapX = IS_SMALL_SCREEN and 6 or 6
+	local moodGapY = IS_SMALL_SCREEN and 6 or 6
+	local moodRows = math.ceil(#MOODS / moodColumns)
+	local moodContainerHeight = (moodRows * moodCellHeight) + ((moodRows - 1) * moodGapY)
 
-	local mCorner = Instance.new("UICorner")
-	mCorner.CornerRadius = UDim.new(0, 8)
-	mCorner.Parent = moodBtn
+	moodContainer.Size = UDim2.new(1, 0, 0, moodContainerHeight)
+	moodContainer.Position = UDim2.new(0, 0, 0, yOffset)
+	moodContainer.BackgroundTransparency = 1
+	moodContainer.Parent = formFrame
 
-	moodButtons[mood] = moodBtn
+	local moodGrid = Instance.new("UIGridLayout")
+	moodGrid.CellPadding = UDim2.new(0, moodGapX, 0, moodGapY)
+	-- Use FillDirection + proportional width so exactly moodColumns fit per row
+	-- Subtract total gap space then divide evenly
+	local totalGapX = moodGapX * (moodColumns - 1)
+	moodGrid.CellSize = UDim2.new(1 / moodColumns, -totalGapX / moodColumns, 0, moodCellHeight)
+	moodGrid.FillDirectionMaxCells = moodColumns
+	moodGrid.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	moodGrid.SortOrder = Enum.SortOrder.LayoutOrder
+	moodGrid.Parent = moodContainer
 
-	moodBtn.MouseButton1Click:Connect(function()
-		selectedMood = mood
-		for m, btn in pairs(moodButtons) do
-			if m == mood then
-				tween(btn, { BackgroundColor3 = COLORS.accent })
-			else
-				tween(btn, { BackgroundColor3 = COLORS.input })
+	for i, mood in ipairs(MOODS) do
+		local moodBtn = Instance.new("TextButton")
+		moodBtn.Name = mood
+		moodBtn.Size = UDim2.new(0, 70, 0, moodCellHeight)
+		moodBtn.LayoutOrder = i
+		moodBtn.BackgroundColor3 = COLORS.input
+		moodBtn.Text = (MOOD_SYMBOLS[mood] or "") .. " " .. mood
+		moodBtn.TextSize = IS_SMALL_SCREEN and 12 or 10
+		moodBtn.TextColor3 = COLORS.text
+		moodBtn.Font = Enum.Font.GothamBold
+		moodBtn.Parent = moodContainer
+
+		local mCorner = Instance.new("UICorner")
+		mCorner.CornerRadius = UDim.new(0, 8)
+		mCorner.Parent = moodBtn
+
+		moodButtons[mood] = moodBtn
+
+		moodBtn.MouseButton1Click:Connect(function()
+			selectedMood = mood
+			for m, btn in pairs(moodButtons) do
+				if m == mood then
+					tween(btn, { BackgroundColor3 = COLORS.accent })
+				else
+					tween(btn, { BackgroundColor3 = COLORS.input })
+				end
+			end
+			updatePreview()
+		end)
+	end
+
+	-- ===========================================================
+	-- PASS FEATURES SECTION (gradient picker, title, VIP badge)
+	-- Positioned after the mood grid; only shows owned features.
+	-- ===========================================================
+	yOffset += moodContainerHeight + 14
+end
+
+print("[ProfileCardGui] Phase 3 OK - form fields + mood grid created")
+-- Gradient state (updated by picker, used in save + updatePreview)
+local selectedGradientStart = Color3.fromRGB(16, 16, 30)
+local selectedGradientEnd   = Color3.fromRGB(30, 22, 50)
+local selectedBgImageId     = ""
+
+local stylePresetBtns   = {}
+local titleBtnRefs     = {}
+local selectedTitleBtn = nil
+
+-- Root section frame (AutomaticSize Y — hides cleanly when Visible = false)
+local passSection = Instance.new("Frame")
+passSection.Name                   = "PassSection"
+passSection.Size                   = UDim2.new(1, 0, 0, 0)
+passSection.Position               = UDim2.new(0, 0, 0, yOffset)
+passSection.BackgroundTransparency = 1
+passSection.AutomaticSize          = Enum.AutomaticSize.Y
+passSection.Visible                = false
+passSection.Parent                 = formFrame
+
+do
+	local psListLayout = Instance.new("UIListLayout")
+	psListLayout.Padding   = UDim.new(0, 8)
+	psListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	psListLayout.Parent    = passSection
+end
+
+-- "Unlock features" link (shown when no passes owned)
+local shopLink
+do
+	shopLink = Instance.new("TextButton")
+	shopLink.Name = "ShopLink"
+	shopLink.Size = UDim2.new(1, 0, 0, 36)
+	shopLink.Position = UDim2.new(0, 0, 0, yOffset)
+	shopLink.BackgroundColor3 = Color3.fromRGB(24, 22, 40)
+	shopLink.BackgroundTransparency = 0.3
+	shopLink.Text = utf8.char(0x1F6D2) .. "  Unlock more features in the Shop"
+	shopLink.TextColor3 = Color3.fromRGB(138, 100, 214)
+	shopLink.TextSize = 11
+	shopLink.Font = Enum.Font.GothamBold
+	shopLink.BorderSizePixel = 0
+	shopLink.AutoButtonColor = false
+	shopLink.Parent = formFrame
+	Instance.new("UICorner", shopLink).CornerRadius = UDim.new(0, 10)
+	local shopLinkStroke = Instance.new("UIStroke")
+	shopLinkStroke.Color = Color3.fromRGB(138, 100, 214)
+	shopLinkStroke.Transparency = 0.7
+	shopLinkStroke.Thickness = 1
+	shopLinkStroke.Parent = shopLink
+
+	shopLink.MouseEnter:Connect(function()
+		TweenService:Create(shopLink, TweenInfo.new(0.12), { BackgroundTransparency = 0.1 }):Play()
+		TweenService:Create(shopLinkStroke, TweenInfo.new(0.12), { Transparency = 0.3 }):Play()
+	end)
+	shopLink.MouseLeave:Connect(function()
+		TweenService:Create(shopLink, TweenInfo.new(0.12), { BackgroundTransparency = 0.3 }):Play()
+		TweenService:Create(shopLinkStroke, TweenInfo.new(0.12), { Transparency = 0.7 }):Play()
+	end)
+	shopLink.MouseButton1Click:Connect(function()
+		if _G.OpenShopGui then
+			_G.OpenShopGui()
+		end
+	end)
+end
+
+-- Section header + VIP badge row
+local vipRow
+do
+	local psHeader = Instance.new("TextLabel")
+	psHeader.Size                   = UDim2.new(1, 0, 0, 14)
+	psHeader.BackgroundTransparency = 1
+	psHeader.Text                   = "PASS FEATURES"
+	psHeader.TextColor3             = COLORS.textMuted
+	psHeader.TextSize               = 10
+	psHeader.Font                   = Enum.Font.GothamBold
+	psHeader.TextXAlignment         = Enum.TextXAlignment.Left
+	psHeader.LayoutOrder            = 0
+	psHeader.Parent                 = passSection
+
+	-- --- VIP badge row ---
+	vipRow = Instance.new("Frame")
+	vipRow.Name                   = "VIPRow"
+	vipRow.Size                   = UDim2.new(1, 0, 0, 32)
+	vipRow.BackgroundColor3       = Color3.fromRGB(255, 200, 55)
+	vipRow.BackgroundTransparency = 0.82
+	vipRow.BorderSizePixel        = 0
+	vipRow.Visible                = false
+	vipRow.LayoutOrder            = 1
+	vipRow.Parent                 = passSection
+	Instance.new("UICorner", vipRow).CornerRadius = UDim.new(0, 8)
+	local vipRowS = Instance.new("UIStroke")
+	vipRowS.Color = Color3.fromRGB(255, 200, 55); vipRowS.Transparency = 0.6; vipRowS.Thickness = 1
+	vipRowS.Parent = vipRow
+	local vipRowLbl = Instance.new("TextLabel")
+	vipRowLbl.Size = UDim2.new(1, -12, 1, 0); vipRowLbl.Position = UDim2.new(0, 10, 0, 0)
+	vipRowLbl.BackgroundTransparency = 1; vipRowLbl.Text = "★  [VIP] Chat Tag  •  Active"
+	vipRowLbl.TextColor3 = Color3.fromRGB(255, 200, 55); vipRowLbl.TextSize = 11
+	vipRowLbl.Font = Enum.Font.GothamBold; vipRowLbl.TextXAlignment = Enum.TextXAlignment.Left
+	vipRowLbl.Parent = vipRow
+end
+
+-- --- Card Gradient section ---
+local gradSection = Instance.new("Frame")
+gradSection.Name                   = "GradSection"
+gradSection.Size                   = UDim2.new(1, 0, 0, 0)
+gradSection.BackgroundTransparency = 1
+gradSection.AutomaticSize          = Enum.AutomaticSize.Y
+gradSection.Visible                = false
+gradSection.LayoutOrder            = 2
+gradSection.Parent                 = passSection
+
+local gradGrid
+do
+	local gsLayout = Instance.new("UIListLayout")
+	gsLayout.Padding = UDim.new(0, 6); gsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	gsLayout.Parent  = gradSection
+
+	local gradHdr = Instance.new("TextLabel")
+	gradHdr.Size = UDim2.new(1, 0, 0, 14); gradHdr.BackgroundTransparency = 1
+	gradHdr.Text = "CARD STYLE"; gradHdr.TextColor3 = COLORS.textMuted
+	gradHdr.TextSize = 10; gradHdr.Font = Enum.Font.GothamBold
+	gradHdr.TextXAlignment = Enum.TextXAlignment.Left; gradHdr.LayoutOrder = 0
+	gradHdr.Parent = gradSection
+
+	gradGrid = Instance.new("Frame")
+	gradGrid.Name = "GradGrid"; gradGrid.Size = UDim2.new(1, 0, 0, 0)
+	gradGrid.BackgroundTransparency = 1; gradGrid.LayoutOrder = 1
+	gradGrid.AutomaticSize = Enum.AutomaticSize.Y
+	gradGrid.Parent = gradSection
+
+	local gradGridLayout = Instance.new("UIGridLayout")
+	gradGridLayout.CellSize              = UDim2.new(0.5, -5, 0, 36)
+	gradGridLayout.CellPadding           = UDim2.new(0, 8, 0, 8)
+	gradGridLayout.FillDirectionMaxCells = 2
+	gradGridLayout.SortOrder             = Enum.SortOrder.LayoutOrder
+	gradGridLayout.Parent                = gradGrid
+end
+
+-- Tracks the currently selected gradient index for checkmark
+local selectedStyleIndex = nil
+
+local function highlightStylePreset(index)
+	selectedStyleIndex = index
+	for gi, g in ipairs(stylePresetBtns) do
+		local isMatch = (gi == index)
+		TweenService:Create(g.stroke, TweenInfo.new(0.12), {
+			Transparency = isMatch and 0.15 or 0.82,
+			Color = isMatch and COLORS.accent or Color3.new(1,1,1),
+		}):Play()
+		-- Update checkmark
+		if g.checkmark then
+			g.checkmark.Visible = isMatch
+		end
+	end
+end
+
+for i, preset in ipairs(CARD_STYLES) do
+	local btn = Instance.new("TextButton")
+	btn.Name = preset.n
+	btn.Size = UDim2.new(0.5, -5, 0, 36)
+	btn.LayoutOrder = i
+	btn.BackgroundColor3 = preset.s
+	btn.Text = ""
+	btn.BorderSizePixel = 0
+	btn.AutoButtonColor = false
+	btn.Parent = gradGrid
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+
+	local bg = Instance.new("UIGradient")
+	bg.Color = ColorSequence.new(preset.s, preset.e)
+	bg.Rotation = 90
+	bg.Parent = btn
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.Position = UDim2.new(0, 0, 0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = preset.n
+	lbl.TextColor3 = Color3.new(1, 1, 1)
+	lbl.TextSize = 11
+	lbl.Font = Enum.Font.GothamBold
+	lbl.ZIndex = 2
+	lbl.Parent = btn
+
+	-- Checkmark indicator (hidden by default)
+	local checkLbl = Instance.new("TextLabel")
+	checkLbl.Name = "Checkmark"
+	checkLbl.Size = UDim2.fromOffset(18, 18)
+	checkLbl.Position = UDim2.new(1, -6, 0.5, 0)
+	checkLbl.AnchorPoint = Vector2.new(1, 0.5)
+	checkLbl.BackgroundTransparency = 1
+	checkLbl.Text = "✓"
+	checkLbl.TextColor3 = Color3.new(1, 1, 1)
+	checkLbl.TextSize = 14
+	checkLbl.Font = Enum.Font.GothamBold
+	checkLbl.ZIndex = 3
+	checkLbl.Visible = false
+	checkLbl.Parent = btn
+
+	local bs = Instance.new("UIStroke")
+	bs.Color = Color3.new(1, 1, 1)
+	bs.Transparency = 0.82
+	bs.Thickness = 1.5
+	bs.Parent = btn
+
+	-- Cursor glow gradient on preset stroke
+	local presetStrokeGrad = Instance.new("UIGradient")
+	presetStrokeGrad.Transparency = Config.GLOW_TRANSPARENCY
+	presetStrokeGrad.Color = ColorSequence.new(preset.e)
+	presetStrokeGrad.Parent = bs
+
+	local presetRef = preset
+	local bsRef     = bs
+	stylePresetBtns[i] = { btn = btn, stroke = bs, preset = preset, checkmark = checkLbl }
+
+	btn.MouseEnter:Connect(function()
+		if selectedStyleIndex ~= i then
+			TweenService:Create(bsRef, TweenInfo.new(0.1), { Transparency = 0.4 }):Play()
+		end
+	end)
+	btn.MouseLeave:Connect(function()
+		if selectedStyleIndex ~= i then
+			TweenService:Create(bsRef, TweenInfo.new(0.1), { Transparency = 0.82, Color = Color3.new(1,1,1) }):Play()
+		end
+	end)
+
+	btn.MouseButton1Click:Connect(function()
+		selectedGradientStart = presetRef.s
+		selectedGradientEnd   = presetRef.e
+		selectedBgImageId     = presetRef.img
+		highlightStylePreset(i)
+		if updatePreview then updatePreview() end
+	end)
+end
+
+-- --- Custom Title section ---
+local titleSection = Instance.new("Frame")
+titleSection.Name = "TitleSection"; titleSection.Size = UDim2.new(1, 0, 0, 0)
+titleSection.BackgroundTransparency = 1; titleSection.AutomaticSize = Enum.AutomaticSize.Y
+titleSection.Visible = false; titleSection.LayoutOrder = 3
+titleSection.Parent = passSection
+
+local tsLayout = Instance.new("UIListLayout")
+tsLayout.Padding = UDim.new(0, 6); tsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tsLayout.Parent  = titleSection
+
+local titleHdr = Instance.new("TextLabel")
+titleHdr.Size = UDim2.new(1, 0, 0, 14); titleHdr.BackgroundTransparency = 1
+titleHdr.Text = "CUSTOM TITLE"; titleHdr.TextColor3 = COLORS.textMuted
+titleHdr.TextSize = 10; titleHdr.Font = Enum.Font.GothamBold
+titleHdr.TextXAlignment = Enum.TextXAlignment.Left; titleHdr.LayoutOrder = 0
+titleHdr.Parent = titleSection
+
+-- Current-title display row with pencil toggle
+local titlePickerRow = Instance.new("Frame")
+titlePickerRow.Size                   = UDim2.new(1, 0, 0, 36)
+titlePickerRow.BackgroundColor3       = COLORS.input
+titlePickerRow.BackgroundTransparency = 0
+titlePickerRow.BorderSizePixel        = 0
+titlePickerRow.LayoutOrder            = 1
+titlePickerRow.Parent                 = titleSection
+Instance.new("UICorner", titlePickerRow).CornerRadius = UDim.new(0, 8)
+local tprStroke = Instance.new("UIStroke")
+tprStroke.Color = COLORS.accent; tprStroke.Transparency = 0.8; tprStroke.Thickness = 1
+tprStroke.Parent = titlePickerRow
+
+local titleCurrentLbl = Instance.new("TextLabel")
+titleCurrentLbl.Size                   = UDim2.new(1, -40, 1, 0)
+titleCurrentLbl.Position               = UDim2.new(0, 10, 0, 0)
+titleCurrentLbl.BackgroundTransparency = 1
+titleCurrentLbl.Text                   = "None"
+titleCurrentLbl.TextColor3             = COLORS.textDim
+titleCurrentLbl.TextSize               = 12
+titleCurrentLbl.Font                   = Enum.Font.GothamBold
+titleCurrentLbl.TextXAlignment         = Enum.TextXAlignment.Left
+titleCurrentLbl.Parent                 = titlePickerRow
+
+local pencilBtn = Instance.new("TextButton")
+pencilBtn.Size             = UDim2.new(0, 30, 0, 30)
+pencilBtn.Position         = UDim2.new(1, -3, 0.5, 0)
+pencilBtn.AnchorPoint      = Vector2.new(1, 0.5)
+pencilBtn.BackgroundColor3 = COLORS.inputFocus
+pencilBtn.Text             = "✏"
+pencilBtn.TextSize         = 13
+pencilBtn.TextColor3       = COLORS.accent
+pencilBtn.Font             = Enum.Font.GothamBold
+pencilBtn.BorderSizePixel  = 0
+pencilBtn.Parent           = titlePickerRow
+Instance.new("UICorner", pencilBtn).CornerRadius = UDim.new(0, 6)
+
+-- Dropdown scrolling frame (hidden by default, shown when pencil clicked)
+local titleDropdown = Instance.new("Frame")
+titleDropdown.Size                   = UDim2.new(1, 0, 0, 0)
+titleDropdown.BackgroundColor3       = COLORS.panel
+titleDropdown.BackgroundTransparency = 0.1
+titleDropdown.BorderSizePixel        = 0
+titleDropdown.Visible                = false
+titleDropdown.LayoutOrder            = 2
+titleDropdown.ClipsDescendants       = true
+titleDropdown.AutomaticSize          = Enum.AutomaticSize.Y
+titleDropdown.Parent                 = titleSection
+Instance.new("UICorner", titleDropdown).CornerRadius = UDim.new(0, 8)
+local ddStroke = Instance.new("UIStroke")
+ddStroke.Color = COLORS.accent; ddStroke.Transparency = 0.7; ddStroke.Thickness = 1
+ddStroke.Parent = titleDropdown
+
+local ddLayout = Instance.new("UIListLayout")
+ddLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ddLayout.Padding   = UDim.new(0, 0)
+ddLayout.Parent    = titleDropdown
+
+local titleDropdownOpen = false
+
+local function setTitleCurrentLabel(optName)
+	-- Remove any existing gradient on the label
+	local existingGrad = titleCurrentLbl:FindFirstChildOfClass("UIGradient")
+	if existingGrad then existingGrad:Destroy() end
+
+	if optName == "Use Tier" or optName == "None" or optName == "" then
+		titleCurrentLbl.Text       = "Use Tier (auto)"
+		titleCurrentLbl.TextColor3 = COLORS.accent
+	else
+		titleCurrentLbl.Text       = optName
+		for _, o in ipairs(TITLE_OPTIONS) do
+			if o.n == optName then
+				titleCurrentLbl.TextColor3 = o.c[1]
+				-- Apply gradient if multiple colors
+				if #o.c >= 2 then
+					local keypoints = {}
+					for ci, col in ipairs(o.c) do
+						table.insert(keypoints, ColorSequenceKeypoint.new((ci - 1) / (#o.c - 1), col))
+					end
+					local grad = Instance.new("UIGradient")
+					grad.Color = ColorSequence.new(keypoints)
+					grad.Parent = titleCurrentLbl
+				end
+				break
 			end
 		end
-		updatePreview()
+	end
+end
+
+local function toggleTitleDropdown(force)
+	local shouldOpen = (force ~= nil) and force or (not titleDropdownOpen)
+	titleDropdownOpen = shouldOpen
+	titleDropdown.Visible = shouldOpen
+	TweenService:Create(tprStroke, TweenInfo.new(0.12), {
+		Transparency = shouldOpen and 0.35 or 0.8
+	}):Play()
+	TweenService:Create(pencilBtn, TweenInfo.new(0.12), {
+		BackgroundColor3 = shouldOpen and COLORS.accent or COLORS.inputFocus,
+		TextColor3       = shouldOpen and Color3.new(1,1,1) or COLORS.accent,
+	}):Play()
+end
+
+pencilBtn.MouseButton1Click:Connect(function() toggleTitleDropdown() end)
+
+for i, opt in ipairs(TITLE_OPTIONS) do
+	local ddRow = Instance.new("TextButton")
+	ddRow.Name             = opt.n
+	ddRow.Size             = UDim2.new(1, 0, 0, 34)
+	ddRow.BackgroundColor3 = COLORS.input
+	ddRow.BackgroundTransparency = 0.4
+	ddRow.Text             = ""  -- we'll use a label with gradient instead
+	ddRow.BorderSizePixel  = 0
+	ddRow.AutoButtonColor  = false
+	ddRow.LayoutOrder      = i
+	ddRow.Parent           = titleDropdown
+
+	-- Gradient text label inside the button
+	local ddTextLbl = Instance.new("TextLabel")
+	ddTextLbl.Size                   = UDim2.new(1, -12, 1, 0)
+	ddTextLbl.Position               = UDim2.new(0, 6, 0, 0)
+	ddTextLbl.BackgroundTransparency = 1
+	ddTextLbl.Text                   = opt.n
+	ddTextLbl.TextColor3             = opt.c[1]
+	ddTextLbl.TextSize               = 12
+	ddTextLbl.Font                   = Enum.Font.GothamBold
+	ddTextLbl.TextXAlignment         = Enum.TextXAlignment.Left
+	ddTextLbl.Parent                 = ddRow
+
+	-- Apply gradient if multiple colors
+	if #opt.c >= 2 then
+		local keypoints = {}
+		for ci, col in ipairs(opt.c) do
+			table.insert(keypoints, ColorSequenceKeypoint.new((ci - 1) / (#opt.c - 1), col))
+		end
+		local ddTextGrad = Instance.new("UIGradient")
+		ddTextGrad.Color = ColorSequence.new(keypoints)
+		ddTextGrad.Rotation = 0
+		ddTextGrad.Parent = ddTextLbl
+	end
+
+	-- Only round top/bottom corners on first/last
+	if i == 1 then
+		Instance.new("UICorner", ddRow).CornerRadius = UDim.new(0, 8)
+	end
+
+	local ddRowStroke = Instance.new("UIStroke")
+	ddRowStroke.Color = opt.c[1]; ddRowStroke.Transparency = 0.9; ddRowStroke.Thickness = 1
+	ddRowStroke.Parent = ddRow
+
+	local optRef    = opt
+	local ddStrkRef = ddRowStroke
+	titleBtnRefs[i] = { btn = ddRow, stroke = ddRowStroke, opt = opt }
+
+	ddRow.MouseEnter:Connect(function()
+		TweenService:Create(ddRow, TweenInfo.new(0.1), { BackgroundTransparency = 0.1 }):Play()
 	end)
+	ddRow.MouseLeave:Connect(function()
+		TweenService:Create(ddRow, TweenInfo.new(0.1), { BackgroundTransparency = 0.4 }):Play()
+	end)
+
+	ddRow.MouseButton1Click:Connect(function()
+		-- "Use Tier" and "None" both clear the custom title (reverts to rep tier)
+		local val = (optRef.isTierDefault or optRef.n == "None" or optRef.n == "Use Tier") and "" or optRef.n
+		SetCustomTitleEvent:FireServer(val)
+		player:SetAttribute("CustomTitle", val)
+
+		-- Highlight selected row
+		if selectedTitleBtn then
+			TweenService:Create(selectedTitleBtn.stroke, TweenInfo.new(0.12), { Transparency = 0.9 }):Play()
+			TweenService:Create(selectedTitleBtn.btn, TweenInfo.new(0.12), { BackgroundTransparency = 0.4 }):Play()
+		end
+		selectedTitleBtn = { btn = ddRow, stroke = ddStrkRef }
+		TweenService:Create(ddStrkRef, TweenInfo.new(0.12), { Transparency = 0.2 }):Play()
+		TweenService:Create(ddRow, TweenInfo.new(0.12), { BackgroundTransparency = 0.05 }):Play()
+
+		setTitleCurrentLabel(optRef.n)
+		toggleTitleDropdown(false)  -- close after pick
+	end)
+end
+
+-- Refresh visibility based on current pass ownership
+local function refreshPassSection()
+	local hasVIP   = player:GetAttribute("OwnsVIP")              == true
+	local hasCard  = player:GetAttribute("OwnsCardCustomization") == true
+	local hasTitle = player:GetAttribute("OwnsCustomTitle")       == true
+	passSection.Visible  = hasVIP or hasCard or hasTitle
+	vipRow.Visible       = hasVIP
+	gradSection.Visible  = hasCard
+	titleSection.Visible = hasTitle
+	shopLink.Visible     = not passSection.Visible  -- show link when no passes owned
+
+	-- Highlight whichever title is currently active and update label
+	if hasTitle then
+		local cur = player:GetAttribute("CustomTitle") or ""
+		setTitleCurrentLabel(cur == "" and "Use Tier" or cur)
+		for _, ref in ipairs(titleBtnRefs) do
+			local match = (ref.opt.isTierDefault and cur == "") or (ref.opt.n == cur)
+			if match then
+				TweenService:Create(ref.stroke, TweenInfo.new(0.12), { Transparency = 0.2 }):Play()
+				TweenService:Create(ref.btn, TweenInfo.new(0.12), { BackgroundTransparency = 0.05 }):Play()
+				selectedTitleBtn = ref
+			else
+				TweenService:Create(ref.stroke, TweenInfo.new(0.12), { Transparency = 0.9 }):Play()
+				TweenService:Create(ref.btn, TweenInfo.new(0.12), { BackgroundTransparency = 0.4 }):Play()
+			end
+		end
+	end
 end
 
 -- -------------------------------------------
 -- SAVE BUTTON
 -- -------------------------------------------
+-- Save button — fixed at the very bottom of the editor panel (outside scroll)
 local saveBtn = Instance.new("TextButton")
-saveBtn.Name = "Save"
-if IS_SMALL_SCREEN then
-	saveBtn.Size = UDim2.new(0.5, 0, 0, 44)
-	saveBtn.Position = UDim2.new(0.5, 0, 1, -6)
-	saveBtn.AnchorPoint = Vector2.new(0.5, 1)
-else
-	saveBtn.Size = UDim2.new(0, 110, 0, 36)
-	saveBtn.Position = UDim2.new(0, 24, 1, -22)
-	saveBtn.AnchorPoint = Vector2.new(0, 1)
-end
+saveBtn.Name        = "Save"
+saveBtn.Size        = UDim2.new(1, -48, 0, 40)
+saveBtn.Position    = UDim2.new(0, 24, 1, -54)
+saveBtn.AnchorPoint = Vector2.new(0, 0)
 saveBtn.BackgroundColor3 = COLORS.accent
-saveBtn.Text = "SAVE"
-saveBtn.TextSize = 13
-saveBtn.TextColor3 = Color3.new(1, 1, 1)
-saveBtn.Font = Enum.Font.GothamBold
-saveBtn.Parent = editorFrame
+saveBtn.Text        = "SAVE"
+saveBtn.TextSize    = 13
+saveBtn.TextColor3  = Color3.new(1, 1, 1)
+saveBtn.Font        = Enum.Font.GothamBold
+saveBtn.ZIndex      = 10
+saveBtn.Parent      = editorFrame
 
-local saveCorner = Instance.new("UICorner")
-saveCorner.CornerRadius = UDim.new(0, 10)
-saveCorner.Parent = saveBtn
+do
+	local saveCorner = Instance.new("UICorner")
+	saveCorner.CornerRadius = UDim.new(0, 10)
+	saveCorner.Parent = saveBtn
+end
 
 local saveStroke = Instance.new("UIStroke")
 saveStroke.Color = COLORS.accentLight
@@ -740,634 +1269,22 @@ saveStroke.Parent = saveBtn
 function updatePreview()
 	local quoteText = formInputs.quote and formInputs.quote.Text or ""
 	local data = {
-		displayName = formInputs.displayName.Text ~= "" and formInputs.displayName.Text or player.DisplayName,
-		bio = formInputs.bio.Text,
+		displayName = player.DisplayName,
+		bio = formInputs.bio and formInputs.bio.Text or "",
 		mood = selectedMood,
 		quote = quoteText,
-		favoriteColor = { 138, 100, 214 },
-		bgGradientStart = { 16, 16, 30 },
-		bgGradientEnd = { 30, 22, 50 },
+		favoriteColor   = { 138, 100, 214 },
+		bgGradientStart = colorToTable(selectedGradientStart),
+		bgGradientEnd   = colorToTable(selectedGradientEnd),
+		bgImageId       = selectedBgImageId,
 	}
 	updateCardDisplay(previewCard, data, player.UserId)
 end
 
+print("[ProfileCardGui] Phase 4 OK - pass section + card styles + title section built")
 -- ===========================================================================
--- VIEWER  �  single unified glass panel (complete redesign)
--- ===========================================================================
--- -- viewport metrics ---------------------------------------------------
-local _vp  = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
-	or Vector2.new(1920, 1080)
-local _VW  = _vp.X
-local _VH  = _vp.Y
-
--- -- panel dimensions ---------------------------------------------------
-local PNLW   = IS_SMALL_SCREEN
-	and math.clamp(math.floor(_VW * 0.56), 210, 280)
-	or  292
-local AVTR   = IS_SMALL_SCREEN and 72 or 86   -- avatar diameter px
-local BTN_H  = IS_SMALL_SCREEN and 40 or 42
-
--- Y-positions computed top-down so nothing ever overlaps
-local _AVY  = 22
-local _NMY  = _AVY  + AVTR  + 8
-local _NMH  = IS_SMALL_SCREEN and 20 or 22
-local _MOY  = _NMY  + _NMH  + 4
-local _MOH  = IS_SMALL_SCREEN and 24 or 26
-local _D1Y  = _MOY  + _MOH  + 10        -- divider
-local _BIOY = _D1Y  + 10                -- bio
-local _BIOH = IS_SMALL_SCREEN and 44 or 52
-local _SIGY = _BIOY + _BIOH + 8         -- rep separator
-local _RTIY = _SIGY + 12                -- rep title
-local _RTIH = IS_SMALL_SCREEN and 16 or 18
-local _BARY = _RTIY + _RTIH + 8         -- progress bar
-local _BARH = IS_SMALL_SCREEN and 7 or 8
-local _NTLY = _BARY + _BARH + 5         -- next-tier label
-local _NTLH = 12
-local _BTHY = _NTLY + _NTLH + 10        -- buttons
-local _STSY = _BTHY + BTN_H + 7         -- status
-local _STSH = 16
-local _PNLH = _STSY + _STSH + 14        -- total panel height
-
--- -- scrim (barely-there, keeps world visible) --------------------------
-local viewerOverlay = Instance.new("Frame")
-viewerOverlay.Name              = "ViewerOverlay"
-viewerOverlay.Size              = UDim2.new(1, 0, 1, 0)
-viewerOverlay.BackgroundColor3  = Color3.fromRGB(4, 4, 10)
-viewerOverlay.BackgroundTransparency = 1
-viewerOverlay.Visible           = false
-viewerOverlay.ZIndex            = 50
-viewerOverlay.Parent            = screenGui
-
--- tapping anywhere outside the panel closes it
-local viewerCloseBtn = Instance.new("TextButton")
-viewerCloseBtn.Size                  = UDim2.new(1, 0, 1, 0)
-viewerCloseBtn.BackgroundTransparency = 1
-viewerCloseBtn.Text                  = ""
-viewerCloseBtn.ZIndex                = 50
-viewerCloseBtn.Parent                = viewerOverlay
-
--- -- main unified glass panel -------------------------------------------
--- PC  ? anchored to the left edge, vertically centered
--- Mobile ? centered, nudged slightly above mid for thumb reach
-local profilePanel = Instance.new("Frame")
-profilePanel.Name          = "ProfilePanel"
-profilePanel.Size          = UDim2.fromOffset(PNLW, _PNLH)
-if IS_SMALL_SCREEN then
-	profilePanel.Position = UDim2.new(0, 14, 0.47, 0)
-	profilePanel.AnchorPoint = Vector2.new(0, 0.5)
-else
-	profilePanel.Position = UDim2.new(0, 44, 0.5, 0)
-	profilePanel.AnchorPoint = Vector2.new(0, 0.5)
-end
-profilePanel.BackgroundColor3 = Color3.fromRGB(10, 10, 19)
-profilePanel.ClipsDescendants = false
-profilePanel.ZIndex           = 51
-profilePanel.Parent           = viewerOverlay
-
-local profilePanelScale = Instance.new("UIScale")
-profilePanelScale.Scale = IS_SMALL_SCREEN and 0.9 or 0.93
-profilePanelScale.Parent = profilePanel
-
-Instance.new("UICorner", profilePanel).CornerRadius = UDim.new(0, 22)
-
--- background gradient   (named BgGradient for updateCardDisplay compat)
-local _grad = Instance.new("UIGradient")
-_grad.Name     = "BgGradient"
-_grad.Rotation = 162
-_grad.Color    = ColorSequence.new(
-	Color3.fromRGB(13, 13, 24),
-	Color3.fromRGB(24, 14, 42)
-)
-_grad.Parent = profilePanel
-
--- border glow stroke   (named CardStroke for updateCardDisplay compat)
-local _stroke = Instance.new("UIStroke")
-_stroke.Name        = "CardStroke"
-_stroke.Thickness   = 1.5
-_stroke.Transparency = 0.5
-_stroke.Color       = COLORS.accent
-_stroke.Parent      = profilePanel
-
-local _strokeGrad = Instance.new("UIGradient")
-_strokeGrad.Rotation = 135
-_strokeGrad.Color = ColorSequence.new({
-	ColorSequenceKeypoint.new(0,   COLORS.accent),
-	ColorSequenceKeypoint.new(0.5, COLORS.accentLight),
-	ColorSequenceKeypoint.new(1,   COLORS.accentDark),
-})
-_strokeGrad.Parent = _stroke
-
--- AccentBar: invisible, kept only so updateCardDisplay color sync still finds it
-local _accentBar = Instance.new("Frame")
-_accentBar.Name               = "AccentBar"
-_accentBar.Size               = UDim2.fromOffset(0, 0)
-_accentBar.BackgroundTransparency = 1
-_accentBar.ZIndex             = 50
-_accentBar.Parent             = profilePanel
-
--- -- X close button (top-right of panel) -------------------------------
-local _xBtn = Instance.new("TextButton")
-_xBtn.Name              = "XClose"
-_xBtn.Size              = UDim2.fromOffset(28, 28)
-_xBtn.Position          = UDim2.new(1, -10, 0, 10)
-_xBtn.AnchorPoint       = Vector2.new(1, 0)
-_xBtn.BackgroundColor3  = Color3.fromRGB(38, 32, 58)
-_xBtn.BorderSizePixel   = 0
-_xBtn.AutoButtonColor   = false
-_xBtn.Text              = "?"
-_xBtn.TextColor3        = Color3.fromRGB(180, 170, 210)
-_xBtn.TextSize          = 13
-_xBtn.Font              = Enum.Font.GothamBold
-_xBtn.ZIndex            = 57
-_xBtn.Parent            = profilePanel
-Instance.new("UICorner", _xBtn).CornerRadius = UDim.new(0, 14)
-
--- -- avatar -------------------------------------------------------------
-local _avatarOuter = Instance.new("Frame")
-_avatarOuter.Name               = "AvatarOuter"
-_avatarOuter.Size               = UDim2.fromOffset(AVTR + 6, AVTR + 6)
-_avatarOuter.Position           = UDim2.new(0.5, 0, 0, _AVY)
-_avatarOuter.AnchorPoint        = Vector2.new(0.5, 0)
-_avatarOuter.BackgroundTransparency = 1
-_avatarOuter.ZIndex             = 52
-_avatarOuter.Parent             = profilePanel
-Instance.new("UICorner", _avatarOuter).CornerRadius = UDim.new(1, 0)
-
-local _avatarGlow = Instance.new("UIStroke")
-_avatarGlow.Name        = "AvatarGlow"
-_avatarGlow.Color       = COLORS.accent
-_avatarGlow.Thickness   = 3
-_avatarGlow.Transparency = 0.18
-_avatarGlow.Parent      = _avatarOuter
-
-local _avatarImg = Instance.new("ImageLabel")
-_avatarImg.Name        = "Avatar"
-_avatarImg.Size        = UDim2.fromOffset(AVTR, AVTR)
-_avatarImg.Position    = UDim2.new(0.5, 0, 0.5, 0)
-_avatarImg.AnchorPoint = Vector2.new(0.5, 0.5)
-_avatarImg.BackgroundColor3 = Color3.fromRGB(22, 18, 35)
-_avatarImg.Image       = ""
-_avatarImg.ZIndex      = 53
-_avatarImg.Parent      = _avatarOuter
-Instance.new("UICorner", _avatarImg).CornerRadius = UDim.new(1, 0)
-
--- -- display name -------------------------------------------------------
-local _nameLabel = Instance.new("TextLabel")
-_nameLabel.Name               = "DisplayName"
-_nameLabel.Size               = UDim2.new(1, -32, 0, _NMH)
-_nameLabel.Position           = UDim2.new(0.5, 0, 0, _NMY)
-_nameLabel.AnchorPoint        = Vector2.new(0.5, 0)
-_nameLabel.BackgroundTransparency = 1
-_nameLabel.Text               = "Player"
-_nameLabel.TextColor3         = COLORS.text
-_nameLabel.TextSize           = IS_SMALL_SCREEN and 17 or 19
-_nameLabel.Font               = Enum.Font.GothamBold
-_nameLabel.ZIndex             = 52
-_nameLabel.Parent             = profilePanel
-
--- -- mood badge ---------------------------------------------------------
-local _moodBadge = Instance.new("Frame")
-_moodBadge.Name               = "MoodBadge"
-_moodBadge.Size               = UDim2.fromOffset(IS_SMALL_SCREEN and 112 or 126, _MOH)
-_moodBadge.Position           = UDim2.new(0.5, 0, 0, _MOY)
-_moodBadge.AnchorPoint        = Vector2.new(0.5, 0)
-_moodBadge.BackgroundColor3   = COLORS.accent
-_moodBadge.BackgroundTransparency = 0.55
-_moodBadge.ZIndex             = 52
-_moodBadge.Parent             = profilePanel
-Instance.new("UICorner", _moodBadge).CornerRadius = UDim.new(1, 0)
-local _ms = Instance.new("UIStroke")
-_ms.Color = COLORS.accent; _ms.Transparency = 0.5; _ms.Thickness = 1
-_ms.Parent = _moodBadge
-
-local _moodLabel = Instance.new("TextLabel")
-_moodLabel.Name               = "MoodText"
-_moodLabel.Size               = UDim2.new(1, -8, 1, 0)
-_moodLabel.BackgroundTransparency = 1
-_moodLabel.Text               = EMOJI.chill .. "  Chill"
-_moodLabel.TextColor3         = COLORS.text
-_moodLabel.TextSize           = IS_SMALL_SCREEN and 11 or 12
-_moodLabel.Font               = Enum.Font.GothamBold
-_moodLabel.ZIndex             = 53
-_moodLabel.Parent             = _moodBadge
-
--- -- thin divider -------------------------------------------------------
-local _div1 = Instance.new("Frame")
-_div1.Name               = "Divider"
-_div1.Size               = UDim2.new(0.5, 0, 0, 1)
-_div1.Position           = UDim2.new(0.5, 0, 0, _D1Y)
-_div1.AnchorPoint        = Vector2.new(0.5, 0)
-_div1.BackgroundColor3   = COLORS.accent
-_div1.BackgroundTransparency = 0.65
-_div1.BorderSizePixel    = 0
-_div1.ZIndex             = 52
-_div1.Parent             = profilePanel
-
--- -- bio ----------------------------------------------------------------
-local _bio = Instance.new("TextLabel")
-_bio.Name               = "Bio"
-_bio.Size               = UDim2.new(1, -28, 0, _BIOH)
-_bio.Position           = UDim2.new(0.5, 0, 0, _BIOY)
-_bio.AnchorPoint        = Vector2.new(0.5, 0)
-_bio.BackgroundTransparency = 1
-_bio.Text               = ""
-_bio.TextColor3         = COLORS.textDim
-_bio.TextSize           = IS_SMALL_SCREEN and 11 or 12
-_bio.Font               = Enum.Font.Gotham
-_bio.TextWrapped        = true
-_bio.TextYAlignment     = Enum.TextYAlignment.Top
-_bio.ZIndex             = 52
-_bio.Parent             = profilePanel
-
--- quote (PC only, small italic, tucked at bottom of bio area)
-if not IS_SMALL_SCREEN then
-	local _q = Instance.new("TextLabel")
-	_q.Name               = "Quote"
-	_q.Size               = UDim2.new(1, -28, 0, 18)
-	_q.Position           = UDim2.new(0.5, 0, 0, _BIOY + _BIOH - 2)
-	_q.AnchorPoint        = Vector2.new(0.5, 0)
-	_q.BackgroundTransparency = 1
-	_q.Text               = ""
-	_q.TextColor3         = COLORS.accentLight
-	_q.TextSize           = 10
-	_q.Font               = Enum.Font.GothamMedium
-	_q.TextWrapped        = true
-	_q.ZIndex             = 52
-	_q.Parent             = profilePanel
-end
-
--- hidden dot for updateCardDisplay fav-color compat
-local _favDot = Instance.new("Frame")
-_favDot.Name               = "FavColorDot"
-_favDot.Size               = UDim2.fromOffset(0, 0)
-_favDot.BackgroundTransparency = 1
-_favDot.ZIndex             = 50
-_favDot.Parent             = profilePanel
-
--- -- rep section --------------------------------------------------------
--- separator line
-local _repSep = Instance.new("Frame")
-_repSep.Name          = "RepSep"
-_repSep.Size          = UDim2.new(1, 0, 0, 1)
-_repSep.Position      = UDim2.new(0, 0, 0, _SIGY)
-_repSep.BackgroundColor3 = Color3.fromRGB(36, 30, 56)
-_repSep.BorderSizePixel = 0
-_repSep.ZIndex        = 52
-_repSep.Parent        = profilePanel
-
--- darker frosted backing under rep content
-local _repBg = Instance.new("Frame")
-_repBg.Name               = "RepBg"
-_repBg.Size               = UDim2.new(1, 0, 0, _PNLH - _SIGY - 1)
-_repBg.Position           = UDim2.new(0, 0, 0, _SIGY + 1)
-_repBg.BackgroundColor3   = Color3.fromRGB(6, 6, 13)
-_repBg.BackgroundTransparency = 0.38
-_repBg.BorderSizePixel    = 0
-_repBg.ZIndex             = 51
-_repBg.Parent             = profilePanel
-Instance.new("UICorner", _repBg).CornerRadius = UDim.new(0, 22)
-
--- Rep title  (tier | score)
-local repTitleLabel = Instance.new("TextLabel")
-repTitleLabel.Name               = "RepTitle"
-repTitleLabel.Size               = UDim2.new(0.6, -8, 0, _RTIH)
-repTitleLabel.Position           = UDim2.new(0, 14, 0, _RTIY)
-repTitleLabel.BackgroundTransparency = 1
-repTitleLabel.Text               = "Visitor  |  0 rep"
-repTitleLabel.TextColor3         = COLORS.accent
-repTitleLabel.TextSize           = IS_SMALL_SCREEN and 11 or 12
-repTitleLabel.Font               = Enum.Font.GothamBold
-repTitleLabel.TextXAlignment     = Enum.TextXAlignment.Left
-repTitleLabel.ZIndex             = 53
-repTitleLabel.Parent             = profilePanel
-
--- progress bar
-local repBarBg = Instance.new("Frame")
-repBarBg.Name               = "RepBarBg"
-repBarBg.Size               = UDim2.new(1, -28, 0, _BARH)
-repBarBg.Position           = UDim2.new(0, 14, 0, _BARY)
-repBarBg.BackgroundColor3   = Color3.fromRGB(28, 24, 44)
-repBarBg.ZIndex             = 53
-repBarBg.Parent             = profilePanel
-Instance.new("UICorner", repBarBg).CornerRadius = UDim.new(1, 0)
-
-local repBarFill = Instance.new("Frame")
-repBarFill.Name             = "RepBarFill"
-repBarFill.Size             = UDim2.new(0, 0, 1, 0)
-repBarFill.BackgroundColor3 = COLORS.accent
-repBarFill.ZIndex           = 54
-repBarFill.Parent           = repBarBg
-Instance.new("UICorner", repBarFill).CornerRadius = UDim.new(1, 0)
-
--- next tier
-local nextTierLabel = Instance.new("TextLabel")
-nextTierLabel.Name               = "NextTier"
-nextTierLabel.Size               = UDim2.new(1, -28, 0, _NTLH)
-nextTierLabel.Position           = UDim2.new(0, 14, 0, _NTLY)
-nextTierLabel.BackgroundTransparency = 1
-nextTierLabel.Text               = "Next tier at 25 rep"
-nextTierLabel.TextColor3         = COLORS.textMuted
-nextTierLabel.TextSize           = IS_SMALL_SCREEN and 9 or 10
-nextTierLabel.Font               = Enum.Font.Gotham
-nextTierLabel.TextXAlignment     = Enum.TextXAlignment.Left
-nextTierLabel.ZIndex             = 53
-nextTierLabel.Parent             = profilePanel
-
--- -- vote buttons  ??  ??  ??  (heart in the middle) -------------------
-local repButtonRow = Instance.new("Frame")
-repButtonRow.Name               = "RepButtons"
-repButtonRow.Size               = UDim2.new(1, -28, 0, BTN_H)
-repButtonRow.Position           = UDim2.new(0, 14, 0, _BTHY)
-repButtonRow.BackgroundTransparency = 1
-repButtonRow.ZIndex             = 53
-repButtonRow.Parent             = profilePanel
-
-local repBtnLayout = Instance.new("UIListLayout")
-repBtnLayout.FillDirection      = Enum.FillDirection.Horizontal
-repBtnLayout.SortOrder          = Enum.SortOrder.LayoutOrder
-repBtnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-repBtnLayout.Padding            = UDim.new(0, 8)
-repBtnLayout.Parent             = repButtonRow
-
-local function createRepButton(label, color, order, parent)
-	local btn = Instance.new("TextButton")
-	btn.Size               = UDim2.new(1/3, -6, 1, 0)
-	btn.BackgroundColor3   = color
-	btn.BackgroundTransparency = 0.08
-	btn.Text               = label
-	btn.TextSize           = IS_SMALL_SCREEN and 18 or 15
-	btn.TextColor3         = Color3.new(1, 1, 1)
-	btn.Font               = Enum.Font.GothamBold
-	btn.LayoutOrder        = order
-	btn.ZIndex             = 54
-	btn.Parent             = parent
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
-	local bs = Instance.new("UIStroke")
-	bs.Color = color; bs.Transparency = 0.62; bs.Thickness = 1
-	bs.Parent = btn
-	return btn
-end
-
-local THUMBS_UP_COLOR   = Color3.fromRGB(68, 178, 100)
-local THUMBS_DOWN_COLOR = Color3.fromRGB(200, 62, 62)
-local LOVE_COLOR        = Color3.fromRGB(218, 65, 148)
-
--- layout order: 1 = ??,  2 = ?? (middle),  3 = ??
-local thumbsUpBtn   = createRepButton(EMOJI.thumbsUp .. " +1", THUMBS_UP_COLOR,   1, repButtonRow)
-local loveBtn       = createRepButton(EMOJI.love .. " +2", LOVE_COLOR,         2, repButtonRow)
-local thumbsDownBtn = createRepButton(EMOJI.thumbsDown .. " -1", THUMBS_DOWN_COLOR, 3, repButtonRow)
-
--- -- status label -------------------------------------------------------
-local repStatusLabel = Instance.new("TextLabel")
-repStatusLabel.Name               = "RepStatus"
-repStatusLabel.Size               = UDim2.new(1, -28, 0, _STSH)
-repStatusLabel.Position           = UDim2.new(0, 14, 0, _STSY)
-repStatusLabel.BackgroundTransparency = 1
-repStatusLabel.Text               = "Select a player"
-repStatusLabel.TextColor3         = COLORS.textDim
-repStatusLabel.TextSize           = IS_SMALL_SCREEN and 10 or 11
-repStatusLabel.Font               = Enum.Font.Gotham
-repStatusLabel.TextXAlignment     = Enum.TextXAlignment.Center
-repStatusLabel.ZIndex             = 53
-repStatusLabel.Parent             = profilePanel
-
--- -- aliases required by the functions that follow ---------------------
-local repPanel       = profilePanel   -- flashRepPanel references repPanelStroke
-local repPanelStroke = _stroke        -- UIStroke on the panel
-local viewerCard     = profilePanel   -- updateCardDisplay(viewerCard, �)
-
--- -- X button wiring (pendingRepAction handled by viewerCloseBtn below) -
-local currentViewTargetUserId = nil
-
-_xBtn.MouseButton1Click:Connect(function()
-	currentViewTargetUserId = nil
-	viewerOverlay.Visible = false
-end)
-_xBtn.MouseEnter:Connect(function()
-	tween(_xBtn, { BackgroundColor3 = Color3.fromRGB(180, 48, 55) })
-end)
-_xBtn.MouseLeave:Connect(function()
-	tween(_xBtn, { BackgroundColor3 = Color3.fromRGB(30, 26, 46) })
-end)
-
-local pendingRepAction = nil
-
-local function formatCooldown(seconds)
-	seconds = math.max(0, math.floor(seconds or 0))
-	local hours = math.floor(seconds / 3600)
-	local minutes = math.floor((seconds % 3600) / 60)
-	if hours > 0 then
-		return string.format("%dh %dm", hours, minutes)
-	end
-	return string.format("%dm", minutes)
-end
-
-local function setRepButtonsEnabled(enabled)
-	local active = enabled == true
-	for _, btn in ipairs({ thumbsUpBtn, thumbsDownBtn, loveBtn }) do
-		btn.Active = active
-		btn.AutoButtonColor = active
-		btn.BackgroundTransparency = active and 0.1 or 0.55
-	end
-end
-
--- Store canonical button sizes to prevent pulse accumulation
-local _repBtnSizes = {}
-_repBtnSizes[thumbsUpBtn]   = thumbsUpBtn.Size
-_repBtnSizes[loveBtn]       = loveBtn.Size
-_repBtnSizes[thumbsDownBtn] = thumbsDownBtn.Size
-
-local function pulseRepButton(btn)
-	local base = _repBtnSizes[btn] or btn.Size
-	tween(btn, { Size = UDim2.new(base.X.Scale, base.X.Offset + 6, base.Y.Scale, base.Y.Offset + 4) }, 0.08)
-	task.delay(0.09, function()
-		tween(btn, { Size = base }, 0.12)
-	end)
-end
-
-local function flashRepPanel(color)
-	tween(repPanelStroke, { Color = color, Transparency = 0.2 }, 0.08)
-	task.delay(0.12, function()
-		tween(repPanelStroke, { Color = COLORS.accent, Transparency = 0.7 }, 0.2)
-	end)
-end
-
-local function refreshRepCooldownStatus()
-	if not currentViewTargetUserId then
-		setRepButtonsEnabled(false)
-		return
-	end
-
-	if currentViewTargetUserId == player.UserId then
-		if RunService:IsStudio() then
-			repStatusLabel.Text = EMOJI.studio .. " Studio test - vote freely"
-			repStatusLabel.TextColor3 = Color3.fromRGB(255, 185, 55)
-			setRepButtonsEnabled(true)
-			return
-		end
-		repStatusLabel.Text = "You can't rep yourself"
-		repStatusLabel.TextColor3 = COLORS.textDim
-		setRepButtonsEnabled(false)
-		return
-	end
-
-	local ok, cooldownData = pcall(function()
-		return RequestRepCooldownFunc:InvokeServer(currentViewTargetUserId)
-	end)
-
-	if not ok or type(cooldownData) ~= "table" then
-		repStatusLabel.Text = "Rep unavailable"
-		repStatusLabel.TextColor3 = COLORS.textDim
-		setRepButtonsEnabled(false)
-		return
-	end
-
-	if cooldownData.canVote then
-		repStatusLabel.Text = "React to this player"
-		repStatusLabel.TextColor3 = COLORS.textDim
-		setRepButtonsEnabled(pendingRepAction == nil)
-	else
-		local remaining = cooldownData.remainingSeconds or 0
-		repStatusLabel.Text = "Next rep in " .. formatCooldown(remaining)
-		repStatusLabel.TextColor3 = COLORS.textDim
-		setRepButtonsEnabled(false)
-	end
-end
-
-setRepButtonsEnabled(false)
-repStatusLabel.Text = "Select a player"
-repStatusLabel.TextColor3 = COLORS.textDim
-
--- Function to update the rep display
-local function updateRepDisplay(repData)
-	if not repData then
-		repTitleLabel.Text = "Visitor  |  0 rep"
-		repBarFill.Size = UDim2.new(0, 0, 1, 0)
-		nextTierLabel.Text = ""
-		repStatusLabel.Text = "React to this player"
-		repStatusLabel.TextColor3 = COLORS.textDim
-		return
-	end
-
-	local score = repData.score or 0
-	local title = repData.title or "Visitor"
-	local tierColor = repData.tierColor
-	local nextThreshold = repData.nextThreshold or 10
-	local prevThreshold = repData.prevThreshold or 0
-
-	repTitleLabel.Text = title .. "  |  " .. tostring(score) .. " rep"
-	if tierColor and type(tierColor) == "table" then
-		repTitleLabel.TextColor3 = Color3.fromRGB(tierColor[1] or 138, tierColor[2] or 100, tierColor[3] or 214)
-		repBarFill.BackgroundColor3 = Color3.fromRGB(tierColor[1] or 138, tierColor[2] or 100, tierColor[3] or 214)
-	end
-
-	-- Progress bar
-	local range = math.max(nextThreshold - prevThreshold, 1)
-	local progress = math.clamp((score - prevThreshold) / range, 0, 1)
-	tween(repBarFill, { Size = UDim2.new(progress, 0, 1, 0) }, 0.3)
-
-	nextTierLabel.Text = "Next tier at " .. tostring(nextThreshold) .. " rep"
-end
-
--- Rep button handlers
-local function handleRepAction(action)
-	if not currentViewTargetUserId then return end
-	if currentViewTargetUserId == player.UserId and not RunService:IsStudio() then
-		repStatusLabel.Text = "You can't rep yourself!"
-		return
-	end
-	-- Don't overwrite the cooldown label or fire the server if buttons are on cooldown
-	if not thumbsUpBtn.Active then return end
-	if pendingRepAction then return end
-
-	if action == "thumbsUp" then
-		pulseRepButton(thumbsUpBtn)
-	elseif action == "thumbsDown" then
-		pulseRepButton(thumbsDownBtn)
-	else
-		pulseRepButton(loveBtn)
-	end
-
-	pendingRepAction = action
-	repStatusLabel.Text = "Sending reaction..."
-	repStatusLabel.TextColor3 = COLORS.textDim
-	setRepButtonsEnabled(false)
-	GiveReputationEvent:FireServer(currentViewTargetUserId, action)
-end
-
-thumbsUpBtn.MouseButton1Click:Connect(function() handleRepAction("thumbsUp") end)
-thumbsDownBtn.MouseButton1Click:Connect(function() handleRepAction("thumbsDown") end)
-loveBtn.MouseButton1Click:Connect(function() handleRepAction("love") end)
-
--- Listen for real-time rep updates
-ReputationUpdatedEvent.OnClientEvent:Connect(function(payload)
-	if type(payload) ~= "table" then return end
-
-	if payload.kind == "voteResult" then
-		pendingRepAction = nil
-		if payload.ok then
-			local soundName = getSoundNameFromPayload(payload)
-			if soundName then
-				playRepSound(soundName, 0.6)
-			end
-			if payload.titleUpgraded then
-				playRepSound("Love", 0.8)
-			end
-			repStatusLabel.Text = (payload.delta and payload.delta > 0) and "Reputation boosted!" or "Reaction sent"
-			repStatusLabel.TextColor3 = COLORS.success
-			flashRepPanel(COLORS.success)
-			refreshRepCooldownStatus()
-			if currentViewTargetUserId then
-				task.spawn(function()
-					local ok, repData = pcall(function()
-						return RequestReputationFunc:InvokeServer(currentViewTargetUserId)
-					end)
-					if ok and repData then
-						updateRepDisplay(repData)
-					end
-				end)
-			end
-		else
-			if payload.reason == "Cooldown active" then
-				repStatusLabel.Text = "Next rep in " .. formatCooldown(payload.remainingSeconds or 0)
-			else
-				repStatusLabel.Text = payload.reason or "Couldn't send reaction"
-			end
-			repStatusLabel.TextColor3 = Color3.fromRGB(220, 120, 120)
-			flashRepPanel(Color3.fromRGB(220, 120, 120))
-			refreshRepCooldownStatus()
-		end
-		return
-	end
-
-	if payload.kind == "receivedRep" then
-		local soundName = getSoundNameFromPayload(payload)
-		if soundName then
-			playRepSound(soundName, 0.3)
-		end
-		if payload.titleUpgraded then
-			playRepSound("Love", 0.8)
-			flashRepPanel(COLORS.accentLight)
-		end
-		return
-	end
-
-	if currentViewTargetUserId and payload.userId == currentViewTargetUserId then
-		updateRepDisplay(payload)
-		refreshRepCooldownStatus()
-	end
-end)
-
-viewerCloseBtn.MouseButton1Click:Connect(function()
-	currentViewTargetUserId = nil
-	pendingRepAction = nil
-	setRepButtonsEnabled(false)
-	viewerOverlay.Visible = false
-end)
-
--- -------------------------------------------
 -- OPEN / CLOSE EDITOR
--- -------------------------------------------
+-- ===========================================================================
 local isEditorOpen = false
 
 local function openEditor()
@@ -1385,8 +1302,9 @@ local function openEditor()
 	task.spawn(function()
 		local currentData = RequestProfileCardFunc:InvokeServer(player.UserId)
 		if currentData then
-			formInputs.displayName.Text = currentData.displayName or player.DisplayName
-			formInputs.bio.Text = currentData.bio or ""
+			if formInputs.bio then
+				formInputs.bio.Text = currentData.bio or ""
+			end
 			if formInputs.quote then
 				formInputs.quote.Text = currentData.quote or ""
 			end
@@ -1394,9 +1312,31 @@ local function openEditor()
 			for m, btn in pairs(moodButtons) do
 				btn.BackgroundColor3 = (m == selectedMood) and COLORS.accent or COLORS.input
 			end
+			-- Restore saved gradient
+			if currentData.bgGradientStart then
+				selectedGradientStart = tableToColor(currentData.bgGradientStart)
+				selectedGradientEnd   = tableToColor(currentData.bgGradientEnd or { 30, 22, 50 })
+				-- Find and highlight matching preset using RGB comparison
+				local matchIndex = nil
+				for gi, g in ipairs(stylePresetBtns) do
+					if colorsMatch(g.preset.s, selectedGradientStart) and colorsMatch(g.preset.e, selectedGradientEnd) then
+						matchIndex = gi
+						-- Always grab the img from the matched preset
+						-- (handles old saves that didn't have bgImageId)
+						selectedBgImageId = g.preset.img or ""
+						break
+					end
+				end
+				highlightStylePreset(matchIndex)
+			end
+			-- If server had a bgImageId saved, use that (overrides preset match)
+			if currentData.bgImageId and currentData.bgImageId ~= "" then
+				selectedBgImageId = currentData.bgImageId
+			end
 		else
-			formInputs.displayName.Text = player.DisplayName
+			-- No saved data, defaults are fine
 		end
+		refreshPassSection()
 		updatePreview()
 	end)
 end
@@ -1428,16 +1368,16 @@ end)
 saveBtn.MouseButton1Click:Connect(function()
 	local quoteText = formInputs.quote and formInputs.quote.Text or ""
 	local profileData = {
-		displayName = formInputs.displayName.Text ~= "" and formInputs.displayName.Text or player.DisplayName,
-		bio = formInputs.bio.Text,
+		displayName = player.DisplayName,
+		bio = formInputs.bio and formInputs.bio.Text or "",
 		mood = selectedMood,
 		quote = quoteText,
-		favoriteColor = { 138, 100, 214 },
-		bgGradientStart = { 16, 16, 30 },
-		bgGradientEnd = { 30, 22, 50 },
+		favoriteColor   = { 138, 100, 214 },
+		bgGradientStart = colorToTable(selectedGradientStart),
+		bgGradientEnd   = colorToTable(selectedGradientEnd),
+		bgImageId       = selectedBgImageId,
 		cardStyle = "default",
 	}
-
 	SaveProfileCardEvent:FireServer(profileData)
 
 	-- Visual feedback
@@ -1458,203 +1398,76 @@ saveBtn.MouseLeave:Connect(function()
 	tween(saveStroke, { Transparency = 0.5 })
 end)
 
--- -------------------------------------------
--- HOVER GLOW ON PLAYER CHARACTERS
--- -------------------------------------------
-local mouse = player:GetMouse()
-local currentHighlight = nil
-local currentHighlightChar = nil
+-- ===========================================================================
+-- INITIALIZE VIEWER MODULE
+-- ===========================================================================
+local glowTargets = {}
 
-RunService.RenderStepped:Connect(function()
-	if isEditorOpen then return end
-
-	local target = mouse.Target
-	if not target then
-		if currentHighlight then
-			currentHighlight:Destroy()
-			currentHighlight = nil
-			currentHighlightChar = nil
-		end
-		return
+-- Register style preset button strokes into glowTargets
+for _, entry in ipairs(stylePresetBtns) do
+	local presetGrad = entry.btn:FindFirstChildWhichIsA("UIStroke") and entry.btn:FindFirstChildWhichIsA("UIStroke"):FindFirstChildWhichIsA("UIGradient")
+	if presetGrad then
+		table.insert(glowTargets, { strokeGrad = presetGrad, element = entry.btn })
 	end
-
-	local character = nil
-	local current = target
-	for _ = 1, 5 do
-		if not current then break end
-		if current:FindFirstChildOfClass("Humanoid") then
-			character = current
-			break
-		end
-		current = current.Parent
-	end
-
-	local targetPlayer = character and Players:GetPlayerFromCharacter(character)
-
-	if targetPlayer and targetPlayer ~= player then
-		if currentHighlightChar ~= character then
-			if currentHighlight then
-				currentHighlight:Destroy()
-			end
-
-			local highlight = Instance.new("Highlight")
-			highlight.Name = "ProfileHoverGlow"
-			highlight.Adornee = character
-			highlight.FillColor = COLORS.accent
-			highlight.FillTransparency = 0.85
-			highlight.OutlineColor = COLORS.accentLight
-			highlight.OutlineTransparency = 0.3
-			highlight.DepthMode = Enum.HighlightDepthMode.Occluded
-			highlight.Parent = character
-
-			currentHighlight = highlight
-			currentHighlightChar = character
-		end
-	else
-		if currentHighlight then
-			currentHighlight:Destroy()
-			currentHighlight = nil
-			currentHighlightChar = nil
-		end
-	end
-end)
-
--- -------------------------------------------
--- DOUBLE-CLICK TO VIEW CARD
--- -------------------------------------------
-local lastClickTime = 0
-local lastClickTarget = nil
-
-mouse.Button1Down:Connect(function()
-	if isEditorOpen then return end
-
-	local target = mouse.Target
-	if not target then return end
-
-	local character = nil
-	local current = target
-	for _ = 1, 5 do
-		if not current then break end
-		if current:FindFirstChildOfClass("Humanoid") then
-			character = current
-			break
-		end
-		current = current.Parent
-	end
-
-	if not character then return end
-
-	local targetPlayer = Players:GetPlayerFromCharacter(character)
-	if not targetPlayer or targetPlayer == player then return end
-
-	local now = tick()
-	if lastClickTarget == character and (now - lastClickTime) < DOUBLE_CLICK_TIME then
-		lastClickTime = 0
-		lastClickTarget = nil
-
-		task.spawn(function()
-			local cardData = RequestProfileCardFunc:InvokeServer(targetPlayer.UserId)
-			if cardData then
-				currentViewTargetUserId = targetPlayer.UserId
-				pendingRepAction = nil
-				updateCardDisplay(viewerCard, cardData, targetPlayer.UserId)
-				setRepButtonsEnabled(false)
-				repStatusLabel.Text = "Loading reputation..."
-				repStatusLabel.TextColor3 = COLORS.textDim
-
-				local ok, repData = pcall(function()
-					return RequestReputationFunc:InvokeServer(targetPlayer.UserId)
-				end)
-				if ok and repData then
-					updateRepDisplay(repData)
-				else
-					updateRepDisplay(nil)
-				end
-				refreshRepCooldownStatus()
-				viewerOverlay.Visible = true
-			end
-		end)
-	else
-		lastClickTime = now
-		lastClickTarget = character
-	end
-end)
-
--- Listen for real-time profile updates
-ProfileCardUpdatedEvent.OnClientEvent:Connect(function(userId, data)
-	if viewerOverlay.Visible and currentViewTargetUserId == userId then
-		updateCardDisplay(viewerCard, data, userId)
-	end
-end)
-
--- -------------------------------------------
--- STUDIO DEBUG BUTTON  (only visible in Studio)
--- -------------------------------------------
-if RunService:IsStudio() then
-	local dbgBtn = Instance.new("TextButton")
-	dbgBtn.Name             = "StudioDebugCard"
-	dbgBtn.Size             = UDim2.fromOffset(180, 38)
-	dbgBtn.Position         = UDim2.new(0, 12, 1, -12)
-	dbgBtn.AnchorPoint      = Vector2.new(0, 1)
-	dbgBtn.BackgroundColor3 = Color3.fromRGB(48, 36, 80)
-	dbgBtn.BorderSizePixel  = 0
-	dbgBtn.AutoButtonColor  = false
-	dbgBtn.Text             = EMOJI.studio .. "  View My Card (Studio)"
-	dbgBtn.TextSize         = 12
-	dbgBtn.TextColor3       = Color3.fromRGB(255, 210, 100)
-	dbgBtn.Font             = Enum.Font.GothamBold
-	dbgBtn.ZIndex           = 10
-	dbgBtn.Parent           = screenGui
-	Instance.new("UICorner", dbgBtn).CornerRadius = UDim.new(0, 10)
-
-	local dbgStroke = Instance.new("UIStroke")
-	dbgStroke.Color       = Color3.fromRGB(180, 130, 255)
-	dbgStroke.Transparency = 0.55
-	dbgStroke.Thickness   = 1
-	dbgStroke.Parent      = dbgBtn
-
-	dbgBtn.MouseButton1Click:Connect(function()
-		task.spawn(function()
-			local cardData = RequestProfileCardFunc:InvokeServer(player.UserId)
-			if not cardData then
-				-- build minimal fallback so the viewer still opens
-				cardData = {
-					displayName = player.DisplayName,
-					bio = "(no card saved yet)",
-					mood = "Chill",
-					quote = "",
-					favoriteColor = { 138, 100, 214 },
-					bgGradientStart = { 16, 16, 30 },
-					bgGradientEnd = { 30, 22, 50 },
-				}
-			end
-			currentViewTargetUserId = player.UserId
-			pendingRepAction = nil
-			updateCardDisplay(viewerCard, cardData, player.UserId)
-			setRepButtonsEnabled(false)
-			repStatusLabel.Text = "Loading reputation..."
-			repStatusLabel.TextColor3 = COLORS.textDim
-
-			local ok, repData = pcall(function()
-				return RequestReputationFunc:InvokeServer(player.UserId)
-			end)
-			if ok and repData then
-				updateRepDisplay(repData)
-			else
-				updateRepDisplay(nil)
-			end
-			refreshRepCooldownStatus()
-			viewerOverlay.Visible = true
-		end)
-	end)
-
-	dbgBtn.MouseEnter:Connect(function()
-		tween(dbgBtn, { BackgroundColor3 = Color3.fromRGB(72, 52, 120) })
-	end)
-	dbgBtn.MouseLeave:Connect(function()
-		tween(dbgBtn, { BackgroundColor3 = Color3.fromRGB(48, 36, 80) })
-	end)
 end
+
+-- Wait for viewer init function to be ready (published by ProfileCardViewer.luau)
+while not _G._ProfileCardViewerInit do task.wait(0.05) end
+local Viewer = _G._ProfileCardViewerInit({
+	screenGui = screenGui,
+	player = player,
+	updateCardDisplay = updateCardDisplay,
+	glowTargets = glowTargets,
+	RequestProfileCardFunc = RequestProfileCardFunc,
+	RequestReputationFunc = RequestReputationFunc,
+	RequestRepCooldownFunc = RequestRepCooldownFunc,
+	GiveReputationEvent = GiveReputationEvent,
+	ReputationUpdatedEvent = ReputationUpdatedEvent,
+	ProfileCardUpdatedEvent = ProfileCardUpdatedEvent,
+	RepSounds = RepSounds,
+	isEditorOpen = function() return isEditorOpen end,
+})
+
+-- ===========================================================================
+-- CURSOR GLOW (unified RenderStepped for all glow targets)
+-- ===========================================================================
+RunService.RenderStepped:Connect(function()
+	local mPos = UserInputService:GetMouseLocation()
+	for _, entry in ipairs(glowTargets) do
+		local el = entry.element
+		if el.AbsoluteSize.X < 1 then continue end
+		local ap = el.AbsolutePosition
+		local as = el.AbsoluteSize
+		local cx = ap.X + as.X * 0.5
+		local cy = ap.Y + as.Y * 0.5
+		local relX = (mPos.X - cx) / (as.X * 0.5)
+		local relY = (mPos.Y - cy) / (as.Y * 0.5)
+		local angle = math.deg(math.atan2(relY, relX))
+		entry.strokeGrad.Rotation = angle
+		entry.strokeGrad.Offset = Vector2.new(
+			math.clamp(relX * 0.3, -0.5, 0.5),
+			math.clamp(relY * 0.3, -0.5, 0.5)
+		)
+	end
+end)
+
+-- ===========================================================================
+-- EYE BUTTON -> Viewer
+-- ===========================================================================
+eyeBtn.MouseButton1Click:Connect(function()
+	Viewer.showCard(player.UserId)
+end)
+
+-- ===========================================================================
+-- KEYBOARD SHORTCUT (P key)
+-- ===========================================================================
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == TOGGLE_KEY then
+		if Viewer.isViewerOpen() then return end
+		if isEditorOpen then closeEditor() else openEditor() end
+	end
+end)
 
 -- -------------------------------------------
 -- PUBLIC API (via _G globals for FeaturesHubGui)
@@ -1662,4 +1475,4 @@ end
 _G.OpenProfileEditor = openEditor
 _G.CloseProfileEditor = closeEditor
 
-print("[ProfileCardGui] Profile card system initialized. Double-click/tap players to view.")
+print("[ProfileCardGui] Profile card system initialized.")

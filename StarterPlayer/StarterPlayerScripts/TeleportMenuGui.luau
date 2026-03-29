@@ -3,7 +3,7 @@
     Location: StarterGui (as a LocalScript inside a ScreenGui)
 
     Reads locations from ReplicatedStorage.LocationsConfig (a ModuleScript).
-    No workspace scanning â€” immune to streaming distance issues.
+    No workspace scanning — immune to streaming distance issues.
 ]]
 
 local Players = game:GetService("Players")

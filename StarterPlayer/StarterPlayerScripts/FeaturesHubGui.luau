@@ -19,18 +19,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Check admin status directly via remote (fast, no yielding for other scripts)
-local isAdmin = false
-do
-	local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
-	local adminFunc = Remotes and Remotes:FindFirstChild("AdminRepCanUse")
+-- Check admin status — game creator is always admin; others checked via remote
+local isAdmin = player.UserId == game.CreatorId
+if not isAdmin then
+	local Remotes   = ReplicatedStorage:WaitForChild("Remotes", 8)
+	local adminFunc = Remotes and Remotes:WaitForChild("AdminRepCanUse", 5)
 	if adminFunc and adminFunc:IsA("RemoteFunction") then
-		local ok, result = pcall(function()
-			return adminFunc:InvokeServer()
-		end)
-		if ok and result == true then
-			isAdmin = true
-		end
+		local ok, result = pcall(function() return adminFunc:InvokeServer() end)
+		if ok and result == true then isAdmin = true end
 	end
 end
 
@@ -54,6 +50,7 @@ local COLORS = {
 	profileAccent = Color3.fromRGB(138, 100, 214),
 	settingsAccent = Color3.fromRGB(100, 200, 160),
 	adminAccent = Color3.fromRGB(220, 80, 100),
+	shopAccent = Color3.fromRGB(255, 200, 55),
 }
 
 local function tween(instance, props, duration, style)
@@ -74,11 +71,11 @@ local HUB_BUTTON_HOVER_SIZE = IS_SMALL_SCREEN and 52 or 60
 local HUB_PANEL_WIDTH = IS_SMALL_SCREEN and 240 or 280
 local HUB_PANEL_HEIGHT = IS_SMALL_SCREEN and 88 or 100
 local HUB_PANEL_OFFSET_Y = IS_SMALL_SCREEN and -76 or -86
-local FEATURE_BTN_SIZE = IS_SMALL_SCREEN and 66 or 78
+local FEATURE_BTN_SIZE = IS_SMALL_SCREEN and 70 or 82
 local FEATURE_BTN_START_X = IS_SMALL_SCREEN and 10 or 14
 local FEATURE_BTN_STEP_X = IS_SMALL_SCREEN and 76 or 88
-local FEATURE_ICON_SIZE = IS_SMALL_SCREEN and 28 or 32
-local FEATURE_ICON_IMAGE_SIZE = IS_SMALL_SCREEN and 18 or 20
+local FEATURE_ICON_SIZE = IS_SMALL_SCREEN and 30 or 36
+local FEATURE_ICON_IMAGE_SIZE = IS_SMALL_SCREEN and 20 or 22
 local FEATURE_LABEL_SIZE = IS_SMALL_SCREEN and 9 or 10
 
 -- -------------------------------------------
@@ -184,6 +181,12 @@ local FEATURES = {
 		iconType = "gear",
 	},
 	{
+		name = "Shop",
+		key = "shop",
+		color = COLORS.shopAccent,
+		iconType = "shop",
+	},
+	{
 		name = "Admin",
 		key = "admin",
 		color = COLORS.adminAccent,
@@ -250,6 +253,8 @@ for _, feature in ipairs(FEATURES) do
 		iconImage.Image = "rbxassetid://6031280882" -- Gear/settings icon
 	elseif feature.iconType == "shield" then
 		iconImage.Image = "rbxassetid://6031075938" -- Shield/admin icon
+	elseif feature.iconType == "shop" then
+		iconImage.Image = "rbxassetid://6031229344" -- Cart icon (Roblox icon library)
 	end
 
 	-- Label (non-interactive)
@@ -287,6 +292,21 @@ local ACTUAL_HUB_PANEL_WIDTH = IS_SMALL_SCREEN
 	or  (14 + actualVisibleCount * 88 + 14)
 
 hubPanel.Size = UDim2.new(0, ACTUAL_HUB_PANEL_WIDTH, 0, HUB_PANEL_HEIGHT)
+
+-- Re-center all buttons within the panel
+do
+	local totalBtnsWidth = (actualVisibleCount - 1) * FEATURE_BTN_STEP_X + FEATURE_BTN_SIZE
+	local centeredStartX = (ACTUAL_HUB_PANEL_WIDTH - totalBtnsWidth) / 2
+	local idx = 0
+	for _, feature in ipairs(FEATURES) do
+		if feature.adminOnly and not isAdmin then continue end
+		local btn = featureButtons[feature.key]
+		if btn then
+			btn.Position = UDim2.new(0, centeredStartX + idx * FEATURE_BTN_STEP_X, 0.5, 0)
+			idx += 1
+		end
+	end
+end
 
 -- -------------------------------------------
 -- HUB OPEN / CLOSE
@@ -413,20 +433,34 @@ featureButtons.settings.MouseButton1Click:Connect(function()
 	end
 end)
 
+-- SHOP
+if featureButtons.shop then
+	featureButtons.shop.MouseButton1Click:Connect(function()
+		closeHub()
+		task.wait(0.15)
+		if _G.OpenShopGui then
+			_G.OpenShopGui()
+		else
+			warn("[FeaturesHubGui] Shop not ready - _G.OpenShopGui is nil")
+		end
+	end)
+end
+
 -- ADMIN PANEL
 if featureButtons.admin then
 	featureButtons.admin.MouseButton1Click:Connect(function()
 		closeHub()
 		task.wait(0.15)
-		if _G.OpenAdminPanel then
-			_G.OpenAdminPanel()
-		else
-			warn("[FeaturesHubGui] Admin panel not ready - _G.OpenAdminPanel is nil")
+		-- Retry a few times in case AdminPanelGui hasn't finished loading yet
+		for attempt = 1, 10 do
+			if _G.OpenAdminPanel then
+				_G.OpenAdminPanel()
+				return
+			end
+			task.wait(0.3)
 		end
+		warn("[FeaturesHubGui] Admin panel not ready after retries - _G.OpenAdminPanel is nil")
 	end)
 end
 
 print("[FeaturesHubGui] Features hub initialized. Press Tab or tap the hub button.")
-
-print("[FeaturesHubGui] Features hub initialized. Press Tab or tap the hub button.")
-
